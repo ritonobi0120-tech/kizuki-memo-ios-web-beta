@@ -112,8 +112,8 @@ h3 {
 .notice,
 .search-card,
 .board-card {
-  padding: 18px;
-  margin-bottom: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
 }
 
 .notice-title {
@@ -150,16 +150,16 @@ textarea {
 .people-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .person-tile {
-  min-height: 112px;
+  min-height: 100px;
   border: 1px solid var(--line);
   border-radius: 22px;
   background: var(--surface-strong);
-  padding: 16px;
+  padding: 14px;
   text-align: left;
   color: var(--text);
   box-shadow: 0 10px 30px rgba(125, 97, 72, 0.08);
@@ -190,7 +190,7 @@ textarea {
 }
 
 .tile-meta {
-  margin-top: 12px;
+  margin-top: 10px;
   font-size: 0.86rem;
   color: var(--muted);
 }

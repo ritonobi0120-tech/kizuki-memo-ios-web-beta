@@ -27,6 +27,7 @@ const dialogs = {
 };
 
 const elements = {
+  installCard: document.getElementById("install-card"),
   searchInput: document.getElementById("search-input"),
   peopleGrid: document.getElementById("people-grid"),
   emptyState: document.getElementById("empty-state"),
@@ -126,8 +127,11 @@ function bindEvents() {
     event.preventDefault();
     const name = elements.personNameInput.value.trim();
     if (!name) return;
-    savePerson(name);
+    const { personId, created } = savePerson(name);
     dialogs.person.close("saved");
+    if (created && personId) {
+      openCapture(personId);
+    }
   });
 
   dialogs.capture.addEventListener("close", () => {
@@ -255,11 +259,17 @@ function bindEvents() {
 
 function render() {
   renderSettingsMeta();
+  renderInstallCard();
   renderPeople();
   renderCapture();
   renderPreview();
   renderHandoff();
   renderSpeechStatus();
+}
+
+function renderInstallCard() {
+  const standalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+  elements.installCard.hidden = standalone || state.people.length >= 3;
 }
 
 function renderSettingsMeta() {
@@ -387,22 +397,27 @@ function openHandoff(personId) {
 function savePerson(name) {
   if (ui.editingPersonId) {
     const person = findPerson(ui.editingPersonId);
-    if (!person) return;
+    if (!person) return { personId: null, created: false };
     person.name = name;
     person.updatedAt = new Date().toISOString();
+    persistState();
+    render();
+    return { personId: person.id, created: false };
   } else {
     const now = new Date().toISOString();
-    state.people.push({
+    const person = {
       id: crypto.randomUUID(),
       name,
       sortOrder: state.people.length,
       createdAt: now,
       updatedAt: now,
       lastAccessedAt: null,
-    });
+    };
+    state.people.push(person);
+    persistState();
+    render();
+    return { personId: person.id, created: true };
   }
-  persistState();
-  render();
 }
 
 function saveMemoFromCapture() {

@@ -86,7 +86,6 @@ test("dialogs are populated before showModal is called", async () => {
     await page.locator("#person-name-input").fill("回帰テスト");
     await page.getByRole("button", { name: "保存" }).click();
 
-    await page.getByRole("button", { name: /回帰テスト/ }).click();
     await page.locator("#capture-dialog[open]").waitFor();
     await page.locator("#capture-draft").fill("開く前から内容が入っているかの確認です。");
     await page.getByRole("button", { name: "保存する" }).click();
@@ -158,6 +157,33 @@ test("manual refresh uses a cache-busted reload url", async () => {
   });
 });
 
+test("install guidance collapses after roster grows", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.confirm = () => true;
+    });
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    assert.equal(await page.locator("#install-card").evaluate((node) => node.hidden), true);
+
+    await page.getByRole("button", { name: "設定" }).click();
+    await page.locator("#settings-dialog[open]").waitFor();
+    await page.getByRole("button", { name: "この beta の保存データを消す" }).click();
+    await page.locator("#settings-dialog").waitFor({ state: "hidden" });
+    assert.equal(await page.locator("#install-card").evaluate((node) => node.hidden), false);
+
+    for (const name of ["一人目", "二人目", "三人目"]) {
+      await page.getByRole("button", { name: "名前を追加" }).click();
+      await page.locator("#person-name-input").fill(name);
+      await page.getByRole("button", { name: "保存" }).click();
+      await page.locator("#capture-dialog[open]").waitFor();
+      await page.locator("#capture-close-button").click();
+      await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+    }
+
+    assert.equal(await page.locator("#install-card").evaluate((node) => node.hidden), true);
+  });
+});
+
 test("capture close confirms before discarding unsaved draft", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -165,7 +191,6 @@ test("capture close confirms before discarding unsaved draft", async () => {
     await page.locator("#person-name-input").fill("破棄確認");
     await page.getByRole("button", { name: "保存" }).click();
 
-    await page.getByRole("button", { name: /破棄確認/ }).click();
     await page.locator("#capture-dialog[open]").waitFor();
     await page.locator("#capture-draft").fill("保存前に閉じたら確認が必要です。");
 
