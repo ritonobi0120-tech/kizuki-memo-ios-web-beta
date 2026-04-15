@@ -207,6 +207,33 @@ button {
   transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
 }
 
+.mic-button {
+  min-width: 184px;
+}
+
+.voice-actions {
+  align-items: stretch;
+}
+
+.speech-status {
+  min-height: 24px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(207, 111, 58, 0.09);
+  color: var(--accent-strong);
+  line-height: 1.5;
+}
+
+.speech-status.is-active {
+  background: rgba(41, 138, 88, 0.12);
+  color: #1f6b45;
+}
+
+.speech-status.is-warning {
+  background: rgba(179, 65, 61, 0.1);
+  color: #8d2f2c;
+}
+
 .primary-button,
 .primary-chip {
   background: var(--accent);

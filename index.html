@@ -84,8 +84,12 @@
 
         <section class="voice-card stack">
           <h3>まずはそのまま話して記録</h3>
-          <p class="subtle">この画面ではキーボードのマイクを使います。メモ欄をタップするとすぐ話せます。</p>
-          <button id="focus-draft-button" class="primary-button" type="button">メモ欄を開く</button>
+          <p class="subtle">大きいマイクボタンで始められます。うまくいかない時は、そのままキーボードのマイクへ切り替えます。</p>
+          <div class="actions wrap voice-actions">
+            <button id="speech-toggle-button" class="primary-button mic-button" type="button">マイクで話す</button>
+            <button id="focus-draft-button" class="secondary-button" type="button">メモ欄を開く</button>
+          </div>
+          <p id="speech-status" class="speech-status">ボタン音声入力を試せます。だめな時はキーボードのマイクへ切り替えます。</p>
         </section>
 
         <label class="stack">

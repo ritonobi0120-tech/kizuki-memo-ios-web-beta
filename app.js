@@ -1,3 +1,9 @@
+import {
+  composeDraftText,
+  detectSpeechSupport,
+  mapSpeechErrorMessage,
+} from "./speech-support.mjs";
+
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
@@ -27,6 +33,8 @@ const elements = {
   captureDraft: document.getElementById("capture-draft"),
   captureScene: document.getElementById("capture-scene"),
   focusDraftButton: document.getElementById("focus-draft-button"),
+  speechToggleButton: document.getElementById("speech-toggle-button"),
+  speechStatus: document.getElementById("speech-status"),
   previewPersonName: document.getElementById("preview-person-name"),
   previewSummaryText: document.getElementById("preview-summary-text"),
   previewMemoList: document.getElementById("preview-memo-list"),
@@ -57,6 +65,16 @@ let ui = {
   handoffPersonId: null,
   handoffPreparedMemoIds: [],
   pendingDeleteMemoId: null,
+};
+
+const speech = {
+  support: detectSpeechSupport(),
+  recognition: null,
+  active: false,
+  manuallyStopped: false,
+  baseText: "",
+  confirmedText: "",
+  lastErrorMessage: "",
 };
 
 boot();
@@ -102,6 +120,14 @@ function bindEvents() {
 
   elements.focusDraftButton.addEventListener("click", () => {
     elements.captureDraft.focus();
+  });
+
+  elements.speechToggleButton.addEventListener("click", () => {
+    if (speech.active) {
+      stopSpeechRecognition({ manual: true });
+      return;
+    }
+    startSpeechRecognition();
   });
 
   elements.previewQuickRecord.addEventListener("click", () => {
@@ -172,6 +198,7 @@ function render() {
   renderCapture();
   renderPreview();
   renderHandoff();
+  renderSpeechStatus();
 }
 
 function renderPeople() {
@@ -209,6 +236,18 @@ function renderCapture() {
   elements.capturePersonName.textContent = person.name;
   elements.captureObservedAt.textContent = formatDateTime(ui.captureObservedAt);
   fillSceneSelect();
+  renderSpeechStatus();
+}
+
+function renderSpeechStatus(message = null, tone = "default") {
+  const fallbackMessage = speech.support.available
+    ? "大きいマイクボタンを押すと音声入力を試せます。うまくいかない時はキーボードのマイクへ切り替えます。"
+    : "この iPhone ではボタン音声入力が使いにくいので、メモ欄を開いてキーボードのマイクを使ってください。";
+  const activeMessage = "聞き取り中です。話し終わったらもう一度押すか、そのまま待ってください。";
+  elements.speechToggleButton.textContent = speech.active ? "音声入力を止める" : "マイクで話す";
+  elements.speechStatus.textContent = message || (speech.active ? activeMessage : fallbackMessage);
+  elements.speechStatus.classList.toggle("is-active", tone === "active");
+  elements.speechStatus.classList.toggle("is-warning", tone === "warning");
 }
 
 function renderPreview() {
@@ -258,6 +297,7 @@ function openCapture(personId) {
   ui.captureObservedAt = new Date().toISOString();
   elements.captureDraft.value = "";
   elements.captureScene.value = "";
+  resetSpeechSession();
   dialogs.capture.showModal();
   renderCapture();
   markOpened(personId);
@@ -324,9 +364,11 @@ function saveMemoFromCapture() {
 }
 
 function clearCaptureDraft() {
+  stopSpeechRecognition({ manual: false, preserveStatus: false });
   ui.capturePersonId = null;
   elements.captureDraft.value = "";
   elements.captureScene.value = "";
+  resetSpeechSession();
 }
 
 function saveSummaryFromHandoff() {
@@ -641,6 +683,115 @@ async function registerServiceWorker() {
   } catch {
     // ignore
   }
+}
+
+function startSpeechRecognition() {
+  if (!speech.support.available) {
+    renderSpeechStatus(mapSpeechErrorMessage("unsupported"), "warning");
+    fallbackToKeyboardMic();
+    return;
+  }
+
+  try {
+    resetSpeechSession();
+    const recognition = new speech.support.ctor();
+    speech.recognition = recognition;
+    speech.baseText = elements.captureDraft.value;
+    speech.confirmedText = "";
+    speech.lastErrorMessage = "";
+    speech.manuallyStopped = false;
+    recognition.lang = "ja-JP";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.addEventListener("result", handleSpeechResult);
+    recognition.addEventListener("error", handleSpeechError);
+    recognition.addEventListener("end", handleSpeechEnd);
+
+    recognition.start();
+    speech.active = true;
+    renderSpeechStatus(null, "active");
+  } catch {
+    renderSpeechStatus(mapSpeechErrorMessage("unsupported"), "warning");
+    fallbackToKeyboardMic();
+  }
+}
+
+function stopSpeechRecognition({ manual, preserveStatus = true }) {
+  if (!speech.recognition) {
+    speech.active = false;
+    if (!preserveStatus) renderSpeechStatus();
+    return;
+  }
+
+  const recognition = speech.recognition;
+  speech.manuallyStopped = manual;
+  try {
+    recognition.stop();
+  } catch {
+    // ignore
+  }
+  speech.active = false;
+
+  if (!preserveStatus) {
+    renderSpeechStatus();
+  } else if (manual) {
+    renderSpeechStatus("音声入力を止めました。続けたい時はもう一度押してください。");
+  }
+}
+
+function handleSpeechResult(event) {
+  let interimText = "";
+  for (let index = event.resultIndex; index < event.results.length; index += 1) {
+    const result = event.results[index];
+    const transcript = result[0]?.transcript?.trim() ?? "";
+    if (!transcript) continue;
+    if (result.isFinal) {
+      speech.confirmedText = composeDraftText(speech.confirmedText, transcript);
+    } else {
+      interimText = composeDraftText(interimText, transcript);
+    }
+  }
+
+  const combinedFinal = composeDraftText(speech.baseText, speech.confirmedText);
+  elements.captureDraft.value = composeDraftText(combinedFinal, interimText);
+}
+
+function handleSpeechError(event) {
+  speech.active = false;
+  speech.lastErrorMessage = mapSpeechErrorMessage(event.error);
+  renderSpeechStatus(speech.lastErrorMessage, "warning");
+  if (event.error === "not-allowed" || event.error === "service-not-allowed" || event.error === "unsupported") {
+    fallbackToKeyboardMic();
+  }
+}
+
+function handleSpeechEnd() {
+  speech.active = false;
+  speech.recognition = null;
+  elements.captureDraft.value = composeDraftText(speech.baseText, speech.confirmedText);
+  if (speech.lastErrorMessage) {
+    renderSpeechStatus(speech.lastErrorMessage, "warning");
+  } else if (speech.manuallyStopped) {
+    renderSpeechStatus("音声入力を止めました。続けたい時はもう一度押してください。");
+  } else {
+    renderSpeechStatus("音声入力を終えました。必要ならもう一度押して続きを話せます。");
+  }
+}
+
+function fallbackToKeyboardMic() {
+  elements.captureDraft.focus();
+  toast("キーボードのマイクでそのまま話せます");
+}
+
+function resetSpeechSession() {
+  speech.active = false;
+  speech.manuallyStopped = false;
+  speech.baseText = "";
+  speech.confirmedText = "";
+  speech.lastErrorMessage = "";
+  speech.recognition = null;
+  renderSpeechStatus();
 }
 
 async function writeTextToClipboard(text) {
