@@ -1,4 +1,4 @@
-# Kizuki Memo iPhone Web Beta
+﻿# Kizuki Memo iPhone Web Beta
 
 Windows だけで配布できる、iPhone 向けの Web beta です。
 
