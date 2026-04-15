@@ -174,12 +174,21 @@ test("json export triggers a downloadable backup file", async () => {
     await page.getByRole("button", { name: "設定" }).click();
     await page.locator("#settings-dialog[open]").waitFor();
 
+    const expectedDate = await page.evaluate(() =>
+      new Intl.DateTimeFormat("sv-SE", {
+        timeZone: "Asia/Tokyo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date()),
+    );
+
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: "JSON を書き出す" }).click(),
     ]);
 
-    assert.match(download.suggestedFilename(), /^kizuki-ios-web-beta-\d{4}-\d{2}-\d{2}\.json$/);
+    assert.equal(download.suggestedFilename(), `kizuki-ios-web-beta-${expectedDate}.json`);
   });
 });
 

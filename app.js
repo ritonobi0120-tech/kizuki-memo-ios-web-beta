@@ -662,7 +662,7 @@ function exportStateAsJson() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `kizuki-ios-web-beta-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.download = `kizuki-ios-web-beta-${formatFilenameDate(new Date())}.json`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -894,6 +894,15 @@ function normalizeImportedState(candidateState) {
     summaries: [...summariesByPersonId.values()],
     scenes: [...sceneSet],
   };
+}
+
+function formatFilenameDate(value) {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value);
 }
 
 function normalizeImportedPerson(person, index, usedPersonIds) {
