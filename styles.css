@@ -27,6 +27,10 @@ body {
     linear-gradient(180deg, #fff8f2 0%, #fffdf9 100%);
 }
 
+body.dialog-open {
+  overflow: hidden;
+}
+
 body,
 button,
 input,
@@ -279,6 +283,12 @@ button {
   background: transparent;
 }
 
+.sheet[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .sheet::backdrop {
   background: rgba(32, 24, 20, 0.38);
   backdrop-filter: blur(4px);
@@ -403,5 +413,30 @@ button {
   .sheet-content {
     width: calc(100vw - 12px);
     padding: 16px;
+  }
+
+  .sheet[open] {
+    width: 100vw;
+    min-width: 100vw;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .sheet-content,
+  .sheet-content.wide {
+    width: 100vw;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    padding:
+      calc(env(safe-area-inset-top, 0px) + 18px)
+      16px
+      calc(env(safe-area-inset-bottom, 0px) + 24px);
+    border-radius: 0;
+    overflow: auto;
+    box-shadow: none;
   }
 }

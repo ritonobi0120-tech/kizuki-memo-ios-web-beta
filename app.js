@@ -47,6 +47,7 @@ const elements = {
   copyHandoffButton: document.getElementById("copy-handoff-button"),
   handoffImportText: document.getElementById("handoff-import-text"),
   settingsCloseButton: document.getElementById("settings-close-button"),
+  refreshAppButton: document.getElementById("refresh-app-button"),
   exportJsonButton: document.getElementById("export-json-button"),
   importJsonInput: document.getElementById("import-json-input"),
   seedDemoButton: document.getElementById("seed-demo-button"),
@@ -83,6 +84,8 @@ function boot() {
   bindEvents();
   ensureSeeded();
   render();
+  syncDialogBodyState();
+  bindDialogStateEvents();
   registerServiceWorker();
 }
 
@@ -96,7 +99,9 @@ function bindEvents() {
     openPersonDialog();
   });
 
-  elements.openSettingsButton.addEventListener("click", () => dialogs.settings.showModal());
+  elements.openSettingsButton.addEventListener("click", () => {
+    showPreparedDialog(dialogs.settings);
+  });
   elements.settingsCloseButton.addEventListener("click", () => dialogs.settings.close());
 
   dialogForms.person.addEventListener("submit", (event) => {
@@ -162,6 +167,7 @@ function bindEvents() {
     saveSummaryFromHandoff();
   });
 
+  elements.refreshAppButton.addEventListener("click", refreshAppVersion);
   elements.exportJsonButton.addEventListener("click", exportStateAsJson);
   elements.importJsonInput.addEventListener("change", importStateFromJson);
   elements.seedDemoButton.addEventListener("click", () => {
@@ -286,7 +292,7 @@ function openPersonDialog(personId = null) {
   const person = personId ? findPerson(personId) : null;
   elements.personDialogTitle.textContent = person ? "名前を編集" : "名前を追加";
   elements.personNameInput.value = person?.name ?? "";
-  dialogs.person.showModal();
+  showPreparedDialog(dialogs.person);
   window.setTimeout(() => elements.personNameInput.focus(), 30);
 }
 
@@ -298,15 +304,15 @@ function openCapture(personId) {
   elements.captureDraft.value = "";
   elements.captureScene.value = "";
   resetSpeechSession();
-  dialogs.capture.showModal();
   renderCapture();
+  showPreparedDialog(dialogs.capture);
   markOpened(personId);
 }
 
 function openPreview(personId) {
   ui.previewPersonId = personId;
-  dialogs.preview.showModal();
   renderPreview();
+  showPreparedDialog(dialogs.preview);
   markOpened(personId);
 }
 
@@ -314,8 +320,8 @@ function openHandoff(personId) {
   ui.handoffPersonId = personId;
   ui.handoffPreparedMemoIds = buildHandoffBundle(personId).includedMemoIds;
   elements.handoffImportText.value = "";
-  dialogs.handoff.showModal();
   renderHandoff();
+  showPreparedDialog(dialogs.handoff);
   markOpened(personId);
 }
 
@@ -682,6 +688,56 @@ async function registerServiceWorker() {
     await navigator.serviceWorker.register("./sw.js");
   } catch {
     // ignore
+  }
+}
+
+function bindDialogStateEvents() {
+  for (const dialog of Object.values(dialogs)) {
+    dialog.addEventListener("close", syncDialogBodyState);
+    dialog.addEventListener("cancel", syncDialogBodyState);
+  }
+}
+
+function syncDialogBodyState() {
+  const anyOpen = Object.values(dialogs).some((dialog) => dialog.open);
+  document.body.classList.toggle("dialog-open", anyOpen);
+}
+
+function showPreparedDialog(dialog) {
+  resetDialogScroll(dialog);
+  dialog.showModal();
+  syncDialogBodyState();
+}
+
+function resetDialogScroll(dialog) {
+  const content = dialog.querySelector(".sheet-content");
+  if (content) {
+    content.scrollTop = 0;
+  }
+}
+
+async function refreshAppVersion() {
+  elements.refreshAppButton.disabled = true;
+  elements.refreshAppButton.textContent = "更新を確認中…";
+  try {
+    if ("serviceWorker" in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister().catch(() => {})));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((key) => key.startsWith("kizuki-ios-web-beta"))
+          .map((key) => caches.delete(key).catch(() => false)),
+      );
+    }
+    toast("最新版を読み込み直します");
+    window.setTimeout(() => window.location.reload(), 180);
+  } catch {
+    elements.refreshAppButton.disabled = false;
+    elements.refreshAppButton.textContent = "最新版に更新する";
+    toast("更新に失敗しました。Safari を開き直してください。");
   }
 }
 
