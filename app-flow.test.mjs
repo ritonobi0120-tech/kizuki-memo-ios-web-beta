@@ -158,6 +158,16 @@ test("manual refresh uses a cache-busted reload url", async () => {
   });
 });
 
+test("search finds kanji names from hiragana input", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#search-input").fill("たな");
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
+    assert.equal(await page.getByRole("button", { name: /佐藤 あおい/ }).count(), 0);
+  });
+});
+
 test("json export triggers a downloadable backup file", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });

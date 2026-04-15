@@ -3,11 +3,12 @@ import {
   detectSpeechSupport,
   mapSpeechErrorMessage,
 } from "./speech-support.mjs";
+import { matchesPersonSearch } from "./name-search.mjs";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
-const WEB_BETA_BUILD_LABEL = "2026-04-15 総デバッグ調整 2";
+const WEB_BETA_BUILD_LABEL = "2026-04-16 かな検索補助";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
@@ -278,7 +279,15 @@ function renderSettingsMeta() {
 
 function renderPeople() {
   const visiblePeople = state.people
-    .filter((person) => person.name.includes(ui.searchText.trim()))
+    .filter((person) =>
+      matchesPersonSearch({
+        query: ui.searchText,
+        name: person.name,
+        alias: person.alias ?? "",
+        aliasCode: person.aliasCode ?? "",
+        kana: person.kana ?? "",
+      }),
+    )
     .sort((a, b) => {
       const aTime = a.lastAccessedAt ?? "";
       const bTime = b.lastAccessedAt ?? "";
