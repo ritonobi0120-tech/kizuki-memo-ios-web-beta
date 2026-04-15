@@ -1,0 +1,23 @@
+{
+  "name": "きづきメモ beta",
+  "short_name": "きづきメモ",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#fff8f2",
+  "theme_color": "#fff7ef",
+  "description": "iPhone で名前を選んですぐメモし、AI 用に整理しやすい beta 版です。",
+  "icons": [
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

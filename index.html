@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#fff7ef" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="きづきメモ beta" />
+    <title>きづきメモ beta</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">iPhone beta</p>
+          <h1>きづきメモ beta</h1>
+          <p class="subtle">名前を選ぶ → すぐ話す → AI で整理。ホーム画面に追加して使えます。</p>
+        </div>
+        <button id="open-settings-button" class="ghost-button" type="button">設定</button>
+      </header>
+
+      <section class="notice install-card">
+        <p class="notice-title">iPhone では Safari で開いて「ホーム画面に追加」がおすすめです</p>
+        <p class="notice-body">音声入力はキーボードのマイクを使うといちばん入りやすいです。録音ボタンを押す代わりに、メモ欄を開いたらそのまま話せます。</p>
+      </section>
+
+      <section class="search-card">
+        <label class="stack">
+          <span class="label">名前で探す</span>
+          <input id="search-input" type="search" placeholder="名前を入力" autocomplete="off" />
+        </label>
+      </section>
+
+      <section class="board-card">
+        <div class="board-header">
+          <div>
+            <h2>名前一覧</h2>
+            <p class="subtle">タップで記録。長押しで最近のメモと AI 連携。</p>
+          </div>
+          <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
+        </div>
+        <div id="people-grid" class="people-grid"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <p>まだ名前がありません。まずは 1 人追加してください。</p>
+        </div>
+      </section>
+    </div>
+
+    <dialog id="person-dialog" class="sheet">
+      <form method="dialog" class="sheet-content stack">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">名前</p>
+            <h2 id="person-dialog-title">名前を追加</h2>
+          </div>
+          <button class="ghost-button" value="cancel">閉じる</button>
+        </header>
+        <label class="stack">
+          <span class="label">名前</span>
+          <input id="person-name-input" type="text" inputmode="text" autocomplete="off" />
+        </label>
+        <div class="actions">
+          <button class="ghost-button" value="cancel">キャンセル</button>
+          <button id="person-save-button" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="capture-dialog" class="sheet">
+      <form method="dialog" class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">すぐ記録</p>
+            <h2 id="capture-person-name">名前</h2>
+            <p id="capture-observed-at" class="subtle"></p>
+          </div>
+          <button class="ghost-button" value="cancel">閉じる</button>
+        </header>
+
+        <section class="voice-card stack">
+          <h3>まずはそのまま話して記録</h3>
+          <p class="subtle">この画面ではキーボードのマイクを使います。メモ欄をタップするとすぐ話せます。</p>
+          <button id="focus-draft-button" class="primary-button" type="button">メモ欄を開く</button>
+        </section>
+
+        <label class="stack">
+          <span class="label">メモ</span>
+          <textarea id="capture-draft" rows="8" placeholder="ここにそのまま話した内容が入るイメージです"></textarea>
+        </label>
+
+        <details class="details-card">
+          <summary>あとで整える項目</summary>
+          <label class="stack top-gap">
+            <span class="label">場面</span>
+            <select id="capture-scene"></select>
+          </label>
+        </details>
+
+        <div class="actions">
+          <button class="ghost-button" value="cancel">キャンセル</button>
+          <button id="capture-save-button" class="primary-button" type="submit">保存する</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="preview-dialog" class="sheet">
+      <div class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">長押しプレビュー</p>
+            <h2 id="preview-person-name">名前</h2>
+            <p id="preview-summary-text" class="subtle"></p>
+          </div>
+          <button id="preview-close-button" class="ghost-button" type="button">閉じる</button>
+        </header>
+
+        <section class="stack">
+          <div class="section-header">
+            <h3>最近のメモ</h3>
+            <p class="subtle">左へスワイプで削除</p>
+          </div>
+          <div id="preview-memo-list" class="memo-list"></div>
+        </section>
+
+        <div class="actions wrap">
+          <button id="preview-quick-record" class="primary-button" type="button">この名前をすぐ記録する</button>
+          <button id="preview-ai-button" class="secondary-button" type="button">AI 用に整理する</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="handoff-dialog" class="sheet">
+      <form method="dialog" class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">AI 連携</p>
+            <h2 id="handoff-person-name">名前</h2>
+            <p id="handoff-pending-count" class="subtle"></p>
+          </div>
+          <button class="ghost-button" value="cancel">閉じる</button>
+        </header>
+
+        <section class="stack">
+          <div class="section-header">
+            <h3>AI に送る文</h3>
+            <button id="copy-handoff-button" class="secondary-button" type="button">コピー</button>
+          </div>
+          <pre id="handoff-copy-block" class="code-block"></pre>
+        </section>
+
+        <section class="stack">
+          <h3>整理文を貼り戻す</h3>
+          <p class="subtle">保存すると、今回 AI に送った範囲のメモだけを片づけます。</p>
+          <textarea id="handoff-import-text" rows="7" placeholder="AI で整えた文をここへ貼り付け"></textarea>
+          <div class="actions">
+            <button class="ghost-button" value="cancel">キャンセル</button>
+            <button id="handoff-save-button" class="primary-button" type="submit">整理ノートに保存</button>
+          </div>
+        </section>
+      </form>
+    </dialog>
+
+    <dialog id="settings-dialog" class="sheet">
+      <div class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">設定</p>
+            <h2>バックアップ</h2>
+          </div>
+          <button id="settings-close-button" class="ghost-button" type="button">閉じる</button>
+        </header>
+        <section class="stack">
+          <p class="subtle">この beta は端末内に保存します。念のため JSON で書き出しておくと安心です。</p>
+          <div class="actions wrap">
+            <button id="export-json-button" class="secondary-button" type="button">JSON を書き出す</button>
+            <label class="secondary-button file-button">
+              JSON を読み込む
+              <input id="import-json-input" type="file" accept="application/json" hidden />
+            </label>
+          </div>
+          <div class="actions wrap">
+            <button id="seed-demo-button" class="ghost-button" type="button">デモデータを入れる</button>
+            <button id="reset-data-button" class="ghost-button danger" type="button">この beta の保存データを消す</button>
+          </div>
+        </section>
+      </div>
+    </dialog>
+
+    <dialog id="confirm-delete-dialog" class="sheet">
+      <form method="dialog" class="sheet-content stack">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">削除確認</p>
+            <h2>このメモを削除しますか</h2>
+          </div>
+        </header>
+        <p class="subtle">元に戻せません。</p>
+        <div class="actions">
+          <button class="ghost-button" value="cancel">キャンセル</button>
+          <button id="confirm-delete-button" class="primary-button danger" value="confirm" type="submit">削除</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+  </html>
