@@ -129,3 +129,27 @@ test("settings includes a manual update button", async () => {
     await page.getByRole("button", { name: "最新版に更新する" }).waitFor();
   });
 });
+
+test("capture close confirms before discarding unsaved draft", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "名前を追加" }).click();
+    await page.locator("#person-name-input").fill("破棄確認");
+    await page.getByRole("button", { name: "保存" }).click();
+
+    await page.getByRole("button", { name: /破棄確認/ }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await page.locator("#capture-draft").fill("保存前に閉じたら確認が必要です。");
+
+    await page.getByRole("button", { name: "閉じる" }).click();
+    await page.locator("#discard-capture-dialog[open]").waitFor();
+    await page.locator("#discard-capture-cancel-button").click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await assert.doesNotReject(() => page.locator("#capture-draft").waitFor());
+
+    await page.getByRole("button", { name: "閉じる" }).click();
+    await page.locator("#discard-capture-dialog[open]").waitFor();
+    await page.locator("#discard-capture-confirm-button").click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+  });
+});

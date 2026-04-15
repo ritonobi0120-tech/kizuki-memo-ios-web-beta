@@ -14,6 +14,7 @@ const dialogForms = {
 const dialogs = {
   person: document.getElementById("person-dialog"),
   capture: document.getElementById("capture-dialog"),
+  discardCapture: document.getElementById("discard-capture-dialog"),
   preview: document.getElementById("preview-dialog"),
   handoff: document.getElementById("handoff-dialog"),
   settings: document.getElementById("settings-dialog"),
@@ -32,9 +33,13 @@ const elements = {
   captureObservedAt: document.getElementById("capture-observed-at"),
   captureDraft: document.getElementById("capture-draft"),
   captureScene: document.getElementById("capture-scene"),
+  captureCloseButton: document.getElementById("capture-close-button"),
+  captureCancelButton: document.getElementById("capture-cancel-button"),
   focusDraftButton: document.getElementById("focus-draft-button"),
   speechToggleButton: document.getElementById("speech-toggle-button"),
   speechStatus: document.getElementById("speech-status"),
+  discardCaptureCancelButton: document.getElementById("discard-capture-cancel-button"),
+  discardCaptureConfirmButton: document.getElementById("discard-capture-confirm-button"),
   previewPersonName: document.getElementById("preview-person-name"),
   previewSummaryText: document.getElementById("preview-summary-text"),
   previewMemoList: document.getElementById("preview-memo-list"),
@@ -66,6 +71,7 @@ let ui = {
   handoffPersonId: null,
   handoffPreparedMemoIds: [],
   pendingDeleteMemoId: null,
+  captureDiscardRequested: false,
 };
 
 const speech = {
@@ -114,7 +120,15 @@ function bindEvents() {
 
   dialogs.capture.addEventListener("close", () => {
     if (dialogs.capture.returnValue === "saved") return;
+    if (ui.captureDiscardRequested) {
+      ui.captureDiscardRequested = false;
+      return;
+    }
     clearCaptureDraft();
+  });
+  dialogs.capture.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    requestCaptureClose();
   });
 
   dialogForms.capture.addEventListener("submit", (event) => {
@@ -126,6 +140,8 @@ function bindEvents() {
   elements.focusDraftButton.addEventListener("click", () => {
     elements.captureDraft.focus();
   });
+  elements.captureCloseButton.addEventListener("click", requestCaptureClose);
+  elements.captureCancelButton.addEventListener("click", requestCaptureClose);
 
   elements.speechToggleButton.addEventListener("click", () => {
     if (speech.active) {
@@ -196,6 +212,12 @@ function bindEvents() {
   dialogs.confirmDelete.addEventListener("close", () => {
     if (dialogs.confirmDelete.returnValue === "confirm") return;
     ui.pendingDeleteMemoId = null;
+  });
+
+  elements.discardCaptureCancelButton.addEventListener("click", () => dialogs.discardCapture.close());
+  elements.discardCaptureConfirmButton.addEventListener("click", () => {
+    dialogs.discardCapture.close("confirm");
+    forceCloseCapture();
   });
 }
 
@@ -375,6 +397,29 @@ function clearCaptureDraft() {
   elements.captureDraft.value = "";
   elements.captureScene.value = "";
   resetSpeechSession();
+}
+
+function hasCaptureDraftChanges() {
+  return (
+    elements.captureDraft.value.trim().length > 0 ||
+    elements.captureScene.value.trim().length > 0 ||
+    speech.confirmedText.trim().length > 0 ||
+    speech.active
+  );
+}
+
+function requestCaptureClose() {
+  if (hasCaptureDraftChanges()) {
+    showPreparedDialog(dialogs.discardCapture);
+    return;
+  }
+  forceCloseCapture();
+}
+
+function forceCloseCapture() {
+  ui.captureDiscardRequested = true;
+  dialogs.capture.close("discard");
+  clearCaptureDraft();
 }
 
 function saveSummaryFromHandoff() {

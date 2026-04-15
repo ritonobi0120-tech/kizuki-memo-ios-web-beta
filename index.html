@@ -79,7 +79,7 @@
             <h2 id="capture-person-name">名前</h2>
             <p id="capture-observed-at" class="subtle"></p>
           </div>
-          <button class="ghost-button" value="cancel">閉じる</button>
+          <button id="capture-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
 
         <section class="voice-card stack">
@@ -106,10 +106,26 @@
         </details>
 
         <div class="actions">
-          <button class="ghost-button" value="cancel">キャンセル</button>
+          <button id="capture-cancel-button" class="ghost-button" type="button">キャンセル</button>
           <button id="capture-save-button" class="primary-button" type="submit">保存する</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="discard-capture-dialog" class="sheet">
+      <div class="sheet-content stack">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">破棄確認</p>
+            <h2>書きかけのメモを閉じますか</h2>
+          </div>
+        </header>
+        <p class="subtle">まだ保存していない内容があります。閉じるとこの入力は消えます。</p>
+        <div class="actions">
+          <button id="discard-capture-cancel-button" class="ghost-button" type="button">キャンセル</button>
+          <button id="discard-capture-confirm-button" class="primary-button danger" type="button">破棄する</button>
+        </div>
+      </div>
     </dialog>
 
     <dialog id="preview-dialog" class="sheet">
