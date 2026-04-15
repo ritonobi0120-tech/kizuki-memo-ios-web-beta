@@ -7,7 +7,7 @@ import {
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
-const WEB_BETA_BUILD_LABEL = "2026-04-15 更新導線 hardening";
+const WEB_BETA_BUILD_LABEL = "2026-04-15 総デバッグ調整 2";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
@@ -654,8 +654,10 @@ function exportStateAsJson() {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `kizuki-ios-web-beta-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
   toast("JSON を書き出しました");
 }
 

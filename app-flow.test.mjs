@@ -52,6 +52,7 @@ async function withPage(run) {
     ...devices["iPhone 13"],
     locale: "ja-JP",
     timezoneId: "Asia/Tokyo",
+    acceptDownloads: true,
   });
   const page = await context.newPage();
 
@@ -154,6 +155,21 @@ test("manual refresh uses a cache-busted reload url", async () => {
 
     assert.match(page.url(), /^http:\/\/127\.0\.0\.1:/);
     assert.match(page.url(), /[?&]update=/);
+  });
+});
+
+test("json export triggers a downloadable backup file", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "設定" }).click();
+    await page.locator("#settings-dialog[open]").waitFor();
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("button", { name: "JSON を書き出す" }).click(),
+    ]);
+
+    assert.match(download.suggestedFilename(), /^kizuki-ios-web-beta-\d{4}-\d{2}-\d{2}\.json$/);
   });
 });
 
