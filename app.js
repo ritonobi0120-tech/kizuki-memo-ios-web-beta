@@ -7,6 +7,8 @@ import {
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
+const WEB_BETA_BUILD_LABEL = "2026-04-15 更新導線 hardening";
+const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
   capture: document.querySelector("#capture-dialog form"),
@@ -59,7 +61,9 @@ const elements = {
   discardHandoffCancelButton: document.getElementById("discard-handoff-cancel-button"),
   discardHandoffConfirmButton: document.getElementById("discard-handoff-confirm-button"),
   settingsCloseButton: document.getElementById("settings-close-button"),
+  webBuildLabel: document.getElementById("web-build-label"),
   refreshAppButton: document.getElementById("refresh-app-button"),
+  openPublicBetaButton: document.getElementById("open-public-beta-button"),
   exportJsonButton: document.getElementById("export-json-button"),
   importJsonInput: document.getElementById("import-json-input"),
   seedDemoButton: document.getElementById("seed-demo-button"),
@@ -206,6 +210,7 @@ function bindEvents() {
   });
 
   elements.refreshAppButton.addEventListener("click", refreshAppVersion);
+  elements.openPublicBetaButton.addEventListener("click", openPublicBetaPage);
   elements.exportJsonButton.addEventListener("click", exportStateAsJson);
   elements.importJsonInput.addEventListener("change", importStateFromJson);
   elements.seedDemoButton.addEventListener("click", () => {
@@ -249,11 +254,16 @@ function bindEvents() {
 }
 
 function render() {
+  renderSettingsMeta();
   renderPeople();
   renderCapture();
   renderPreview();
   renderHandoff();
   renderSpeechStatus();
+}
+
+function renderSettingsMeta() {
+  elements.webBuildLabel.textContent = `現在の版: ${WEB_BETA_BUILD_LABEL}`;
 }
 
 function renderPeople() {
@@ -985,12 +995,31 @@ async function refreshAppVersion() {
           .map((key) => caches.delete(key).catch(() => false)),
       );
     }
-    toast("最新版を読み込み直します");
-    window.setTimeout(() => window.location.reload(), 180);
+    toast("最新版を確認して開き直します");
+    window.setTimeout(() => {
+      window.location.replace(buildRefreshUrl(window.location.href, Date.now()));
+    }, 180);
   } catch {
     elements.refreshAppButton.disabled = false;
     elements.refreshAppButton.textContent = "最新版に更新する";
-    toast("更新に失敗しました。Safari を開き直してください。");
+    toast("更新に失敗しました。公開ページを開き直してください。");
+  }
+}
+
+function buildRefreshUrl(currentUrl, timestamp) {
+  const url = new URL(currentUrl, window.location.href);
+  url.searchParams.set("update", String(timestamp));
+  return url.toString();
+}
+
+function openPublicBetaPage() {
+  try {
+    const opened = window.open(PUBLIC_WEB_BETA_URL, "_blank", "noopener");
+    if (!opened) {
+      window.location.assign(PUBLIC_WEB_BETA_URL);
+    }
+  } catch {
+    window.location.assign(PUBLIC_WEB_BETA_URL);
   }
 }
 

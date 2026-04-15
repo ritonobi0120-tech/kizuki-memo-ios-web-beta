@@ -211,9 +211,18 @@
           <button id="settings-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
         <section class="stack">
+          <div class="settings-update-card stack">
+            <p class="notice-title">更新と配布</p>
+            <p id="web-build-label" class="settings-update-meta"></p>
+            <p class="subtle">表示が古い時はまず `最新版に更新する` を押し、変わらない時は `公開ページを開く` から Safari で開き直してください。</p>
+            <div class="actions wrap">
+              <button id="refresh-app-button" class="primary-button" type="button">最新版に更新する</button>
+              <button id="open-public-beta-button" class="secondary-button" type="button">公開ページを開く</button>
+            </div>
+            <p class="subtle">ホーム画面の見た目が古い時も、公開ページを開き直してからホーム画面へ置き直すと戻しやすいです。</p>
+          </div>
           <p class="subtle">この beta は端末内に保存します。念のため JSON で書き出しておくと安心です。</p>
           <div class="actions wrap">
-            <button id="refresh-app-button" class="primary-button" type="button">最新版に更新する</button>
             <button id="export-json-button" class="secondary-button" type="button">JSON を書き出す</button>
             <label class="secondary-button file-button">
               JSON を読み込む

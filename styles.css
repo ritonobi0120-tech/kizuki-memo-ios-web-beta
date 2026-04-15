@@ -310,6 +310,18 @@ button {
   padding: 16px;
 }
 
+.settings-update-card {
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(207, 111, 58, 0.08);
+  border: 1px solid rgba(207, 111, 58, 0.16);
+}
+
+.settings-update-meta {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .top-gap {
   margin-top: 12px;
 }

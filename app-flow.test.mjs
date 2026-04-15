@@ -121,12 +121,40 @@ test("dialogs are populated before showModal is called", async () => {
   });
 });
 
-test("settings includes a manual update button", async () => {
+test("settings includes update fallback and public page button", async () => {
   await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.__openedUrls = [];
+      window.open = (url, target, features) => {
+        window.__openedUrls.push({ url, target, features });
+        return { closed: false };
+      };
+    });
+
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "設定" }).click();
     await page.locator("#settings-dialog[open]").waitFor();
     await page.getByRole("button", { name: "最新版に更新する" }).waitFor();
+
+    assert.match(await page.locator("#web-build-label").textContent(), /現在の版:/);
+
+    await page.getByRole("button", { name: "公開ページを開く" }).click();
+    const openedUrls = await page.evaluate(() => window.__openedUrls);
+    assert.equal(openedUrls.length, 1);
+    assert.equal(openedUrls[0].url, "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/");
+  });
+});
+
+test("manual refresh uses a cache-busted reload url", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "設定" }).click();
+    await page.locator("#settings-dialog[open]").waitFor();
+    await page.getByRole("button", { name: "最新版に更新する" }).click();
+    await page.waitForURL(/update=/, { timeout: 2500 });
+
+    assert.match(page.url(), /^http:\/\/127\.0\.0\.1:/);
+    assert.match(page.url(), /[?&]update=/);
   });
 });
 
