@@ -153,3 +153,121 @@ test("capture close confirms before discarding unsaved draft", async () => {
     await page.locator("#capture-dialog").waitFor({ state: "hidden" });
   });
 });
+
+test("handoff close confirms before discarding pasted summary", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /田中 はる/ }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await page.locator("#capture-draft").fill("AI 整理前のメモです。");
+    await page.getByRole("button", { name: "保存する" }).click();
+
+    await page.evaluate(async () => {
+      const tile = Array.from(document.querySelectorAll(".person-tile")).find((node) =>
+        node.textContent.includes("田中 はる"),
+      );
+      tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 80, clientY: 80 }));
+      await new Promise((resolve) => setTimeout(resolve, 520));
+      tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 80, clientY: 80 }));
+    });
+    await page.locator("#preview-dialog[open]").waitFor();
+    await page.getByRole("button", { name: "AI 用に整理する" }).click();
+    await page.locator("#handoff-dialog[open]").waitFor();
+    await page.locator("#handoff-import-text").fill("貼り戻し文を保存前に閉じます。");
+
+    await page.locator("#handoff-close-button").click();
+    await page.locator("#discard-handoff-dialog[open]").waitFor();
+    await page.locator("#discard-handoff-cancel-button").click();
+    await page.locator("#handoff-dialog[open]").waitFor();
+    await assert.doesNotReject(() => page.locator("#handoff-import-text").waitFor());
+    assert.equal(await page.locator("#handoff-import-text").inputValue(), "貼り戻し文を保存前に閉じます。");
+
+    await page.locator("#handoff-close-button").click();
+    await page.locator("#discard-handoff-dialog[open]").waitFor();
+    await page.locator("#discard-handoff-confirm-button").click();
+    await page.locator("#handoff-dialog").waitFor({ state: "hidden" });
+  });
+});
+
+test("json import confirms before replacing and accepts versioned backup", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.__confirmMessages = [];
+      window.confirm = (message) => {
+        window.__confirmMessages.push(message);
+        return false;
+      };
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "設定" }).click();
+    await page.locator("#settings-dialog[open]").waitFor();
+
+    const replacementState = {
+      schemaVersion: 1,
+      exportedAt: "2026-04-15T00:00:00.000Z",
+      recordCounts: { people: 1, memos: 1, summaries: 1, scenes: 2 },
+      state: {
+        people: [
+          {
+            id: "person-imported",
+            name: "インポート確認",
+            sortOrder: 0,
+            createdAt: "2026-04-15T00:00:00.000Z",
+            updatedAt: "2026-04-15T00:00:00.000Z",
+            lastAccessedAt: "2026-04-15T00:00:00.000Z",
+          },
+        ],
+        memos: [
+          {
+            id: "memo-imported",
+            personId: "person-imported",
+            observedAt: "2026-04-15T00:10:00.000Z",
+            createdAt: "2026-04-15T00:10:00.000Z",
+            updatedAt: "2026-04-15T00:10:00.000Z",
+            rawText: "確認付きで読み込みたいメモです。",
+            scene: "仕事",
+          },
+        ],
+        summaries: [
+          {
+            personId: "person-imported",
+            summaryText: "確認付きで読み込んだ整理ノートです。",
+            summaryUpdatedAt: "2026-04-15T00:20:00.000Z",
+          },
+        ],
+        scenes: ["仕事", "その他"],
+      },
+    };
+
+    await page.setInputFiles("#import-json-input", {
+      name: "kizuki-import.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(replacementState), "utf-8"),
+    });
+
+    const firstConfirmMessages = await page.evaluate(() => window.__confirmMessages);
+    assert.equal(firstConfirmMessages.length, 1);
+    assert.match(firstConfirmMessages[0], /1 人/);
+    assert.match(firstConfirmMessages[0], /1 件/);
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
+    assert.equal(await page.getByRole("button", { name: /インポート確認/ }).count(), 0);
+
+    await page.evaluate(() => {
+      window.confirm = (message) => {
+        window.__confirmMessages.push(message);
+        return true;
+      };
+    });
+
+    await page.setInputFiles("#import-json-input", {
+      name: "kizuki-import.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(replacementState), "utf-8"),
+    });
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /インポート確認/ }).waitFor());
+    assert.equal(await page.getByRole("button", { name: /田中 はる/ }).count(), 0);
+  });
+});

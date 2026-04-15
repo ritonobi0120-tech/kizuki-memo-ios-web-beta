@@ -5,6 +5,8 @@ import {
 } from "./speech-support.mjs";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
+const STORAGE_SCHEMA_VERSION = 1;
+const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
   capture: document.querySelector("#capture-dialog form"),
@@ -17,6 +19,7 @@ const dialogs = {
   discardCapture: document.getElementById("discard-capture-dialog"),
   preview: document.getElementById("preview-dialog"),
   handoff: document.getElementById("handoff-dialog"),
+  discardHandoff: document.getElementById("discard-handoff-dialog"),
   settings: document.getElementById("settings-dialog"),
   confirmDelete: document.getElementById("confirm-delete-dialog"),
 };
@@ -51,6 +54,10 @@ const elements = {
   handoffCopyBlock: document.getElementById("handoff-copy-block"),
   copyHandoffButton: document.getElementById("copy-handoff-button"),
   handoffImportText: document.getElementById("handoff-import-text"),
+  handoffCloseButton: document.getElementById("handoff-close-button"),
+  handoffCancelButton: document.getElementById("handoff-cancel-button"),
+  discardHandoffCancelButton: document.getElementById("discard-handoff-cancel-button"),
+  discardHandoffConfirmButton: document.getElementById("discard-handoff-confirm-button"),
   settingsCloseButton: document.getElementById("settings-close-button"),
   refreshAppButton: document.getElementById("refresh-app-button"),
   exportJsonButton: document.getElementById("export-json-button"),
@@ -72,6 +79,7 @@ let ui = {
   handoffPreparedMemoIds: [],
   pendingDeleteMemoId: null,
   captureDiscardRequested: false,
+  handoffDiscardRequested: false,
 };
 
 const speech = {
@@ -130,6 +138,18 @@ function bindEvents() {
     event.preventDefault();
     requestCaptureClose();
   });
+  dialogs.handoff.addEventListener("close", () => {
+    if (dialogs.handoff.returnValue === "saved") return;
+    if (ui.handoffDiscardRequested) {
+      ui.handoffDiscardRequested = false;
+      return;
+    }
+    clearHandoffDraft();
+  });
+  dialogs.handoff.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    requestHandoffClose();
+  });
 
   dialogForms.capture.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -164,6 +184,8 @@ function bindEvents() {
   });
 
   elements.previewCloseButton.addEventListener("click", () => dialogs.preview.close());
+  elements.handoffCloseButton.addEventListener("click", requestHandoffClose);
+  elements.handoffCancelButton.addEventListener("click", requestHandoffClose);
 
   elements.copyHandoffButton.addEventListener("click", async () => {
     if (!ui.handoffPersonId) return;
@@ -218,6 +240,11 @@ function bindEvents() {
   elements.discardCaptureConfirmButton.addEventListener("click", () => {
     dialogs.discardCapture.close("confirm");
     forceCloseCapture();
+  });
+  elements.discardHandoffCancelButton.addEventListener("click", () => dialogs.discardHandoff.close());
+  elements.discardHandoffConfirmButton.addEventListener("click", () => {
+    dialogs.discardHandoff.close("confirm");
+    forceCloseHandoff();
   });
 }
 
@@ -422,6 +449,30 @@ function forceCloseCapture() {
   clearCaptureDraft();
 }
 
+function clearHandoffDraft() {
+  ui.handoffPersonId = null;
+  ui.handoffPreparedMemoIds = [];
+  elements.handoffImportText.value = "";
+}
+
+function hasHandoffDraftChanges() {
+  return elements.handoffImportText.value.trim().length > 0;
+}
+
+function requestHandoffClose() {
+  if (hasHandoffDraftChanges()) {
+    showPreparedDialog(dialogs.discardHandoff);
+    return;
+  }
+  forceCloseHandoff();
+}
+
+function forceCloseHandoff() {
+  ui.handoffDiscardRequested = true;
+  dialogs.handoff.close("discard");
+  clearHandoffDraft();
+}
+
 function saveSummaryFromHandoff() {
   const personId = ui.handoffPersonId;
   const text = elements.handoffImportText.value.trim();
@@ -441,9 +492,8 @@ function saveSummaryFromHandoff() {
   const includedIds = [...ui.handoffPreparedMemoIds];
   state.memos = state.memos.filter((memo) => !includedIds.includes(memo.id));
   persistState();
-  dialogs.handoff.close();
-  ui.handoffPersonId = null;
-  ui.handoffPreparedMemoIds = [];
+  dialogs.handoff.close("saved");
+  clearHandoffDraft();
   render();
   toast("整理ノートを保存しました");
 }
@@ -567,7 +617,14 @@ function fillSceneSelect() {
 }
 
 function exportStateAsJson() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const payload = {
+    app: "kizuki-ios-web-beta",
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    recordCounts: summarizeStateCounts(state),
+    state: normalizeImportedState(state),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -583,11 +640,18 @@ async function importStateFromJson(event) {
   try {
     const text = await file.text();
     const parsed = JSON.parse(text);
-    if (!parsed.people || !parsed.memos || !parsed.summaries) throw new Error("invalid");
-    state = parsed;
+    const importedState = normalizeImportedState(parsed?.state ?? parsed);
+    const counts = summarizeStateCounts(importedState);
+    const shouldReplace = window.confirm(buildImportConfirmationMessage(file.name, counts));
+    if (!shouldReplace) {
+      toast("JSON 読み込みをキャンセルしました");
+      return;
+    }
+    state = importedState;
     persistState();
     render();
-    toast("JSON を読み込みました");
+    dialogs.settings.close();
+    toast(`JSON を読み込みました（${counts.people}人 / メモ ${counts.memos}件）`);
   } catch {
     toast("JSON を読み込めませんでした");
   } finally {
@@ -600,7 +664,7 @@ function emptyState() {
     people: [],
     memos: [],
     summaries: [],
-    scenes: ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"],
+    scenes: [...DEFAULT_SCENES],
   };
 }
 
@@ -632,7 +696,7 @@ function createDemoState() {
         summaryUpdatedAt: new Date(now - 2400_000).toISOString(),
       },
     ],
-    scenes: ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"],
+    scenes: [...DEFAULT_SCENES],
   };
 }
 
@@ -664,7 +728,7 @@ function makeMemo(personId, observedAtMs, rawText, scene) {
 function loadState() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (parsed?.people && parsed?.memos && parsed?.summaries) return parsed;
+    if (parsed) return normalizeImportedState(parsed);
   } catch {
     // ignore and reseed
   }
@@ -672,7 +736,7 @@ function loadState() {
 }
 
 function persistState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeImportedState(state)));
 }
 
 function formatDateTime(value) {
@@ -725,6 +789,150 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function summarizeStateCounts(sourceState) {
+  const normalized = normalizeImportedState(sourceState);
+  return {
+    people: normalized.people.length,
+    memos: normalized.memos.length,
+    summaries: normalized.summaries.length,
+    scenes: normalized.scenes.length,
+  };
+}
+
+function buildImportConfirmationMessage(fileName, counts) {
+  return [
+    `${fileName} を読み込みます。`,
+    "この beta の保存データを読み込んだ内容で置き換えます。",
+    `- 名前 ${counts.people} 人`,
+    `- メモ ${counts.memos} 件`,
+    `- 整理ノート ${counts.summaries} 件`,
+    `- 場面 ${counts.scenes} 件`,
+    "続けますか。",
+  ].join("\n");
+}
+
+function normalizeImportedState(candidateState) {
+  if (!candidateState || typeof candidateState !== "object") throw new Error("invalid");
+  const peopleSource = Array.isArray(candidateState.people) ? candidateState.people : null;
+  const memosSource = Array.isArray(candidateState.memos) ? candidateState.memos : null;
+  const summariesSource = Array.isArray(candidateState.summaries) ? candidateState.summaries : null;
+  if (!peopleSource || !memosSource || !summariesSource) throw new Error("invalid");
+
+  const usedPersonIds = new Set();
+  const people = peopleSource
+    .map((person, index) => normalizeImportedPerson(person, index, usedPersonIds))
+    .filter(Boolean);
+  const personIds = new Set(people.map((person) => person.id));
+
+  const sceneSet = new Set(DEFAULT_SCENES);
+  if (Array.isArray(candidateState.scenes)) {
+    candidateState.scenes.forEach((scene) => {
+      const normalized = normalizeOptionalText(scene);
+      if (normalized) sceneSet.add(normalized);
+    });
+  }
+
+  const memos = memosSource
+    .map((memo) => normalizeImportedMemo(memo, personIds))
+    .filter(Boolean);
+  memos.forEach((memo) => {
+    if (memo.scene) sceneSet.add(memo.scene);
+  });
+
+  const summariesByPersonId = new Map();
+  summariesSource
+    .map((summary) => normalizeImportedSummary(summary, personIds))
+    .filter(Boolean)
+    .forEach((summary) => {
+      const current = summariesByPersonId.get(summary.personId);
+      if (!current || current.summaryUpdatedAt < summary.summaryUpdatedAt) {
+        summariesByPersonId.set(summary.personId, summary);
+      }
+    });
+
+  return {
+    people: people.sort((a, b) => a.sortOrder - b.sortOrder),
+    memos,
+    summaries: [...summariesByPersonId.values()],
+    scenes: [...sceneSet],
+  };
+}
+
+function normalizeImportedPerson(person, index, usedPersonIds) {
+  if (!person || typeof person !== "object") return null;
+  const name = normalizeRequiredText(person.name);
+  if (!name) return null;
+  const id = uniqueIdFrom(person.id, usedPersonIds);
+  return {
+    id,
+    name,
+    sortOrder: normalizeSortOrder(person.sortOrder, index),
+    createdAt: normalizeIsoString(person.createdAt),
+    updatedAt: normalizeIsoString(person.updatedAt),
+    lastAccessedAt: normalizeNullableIsoString(person.lastAccessedAt),
+  };
+}
+
+function normalizeImportedMemo(memo, personIds) {
+  if (!memo || typeof memo !== "object") return null;
+  const personId = normalizeRequiredText(memo.personId);
+  const rawText = normalizeRequiredText(memo.rawText);
+  if (!personId || !personIds.has(personId) || !rawText) return null;
+  return {
+    id: normalizeRequiredText(memo.id) || crypto.randomUUID(),
+    personId,
+    observedAt: normalizeIsoString(memo.observedAt),
+    createdAt: normalizeIsoString(memo.createdAt ?? memo.observedAt),
+    updatedAt: normalizeIsoString(memo.updatedAt ?? memo.observedAt),
+    rawText,
+    scene: normalizeOptionalText(memo.scene),
+  };
+}
+
+function normalizeImportedSummary(summary, personIds) {
+  if (!summary || typeof summary !== "object") return null;
+  const personId = normalizeRequiredText(summary.personId);
+  if (!personId || !personIds.has(personId)) return null;
+  return {
+    personId,
+    summaryText: typeof summary.summaryText === "string" ? summary.summaryText.trim() : "",
+    summaryUpdatedAt: normalizeIsoString(summary.summaryUpdatedAt),
+  };
+}
+
+function normalizeRequiredText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeOptionalText(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeSortOrder(value, fallback) {
+  return Number.isFinite(Number(value)) ? Number(value) : fallback;
+}
+
+function normalizeIsoString(value) {
+  if (typeof value === "string" && !Number.isNaN(Date.parse(value))) {
+    return new Date(value).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function normalizeNullableIsoString(value) {
+  if (value == null || value === "") return null;
+  return normalizeIsoString(value);
+}
+
+function uniqueIdFrom(value, usedIds) {
+  let candidate = normalizeRequiredText(value) || crypto.randomUUID();
+  while (usedIds.has(candidate)) {
+    candidate = crypto.randomUUID();
+  }
+  usedIds.add(candidate);
+  return candidate;
 }
 
 async function registerServiceWorker() {

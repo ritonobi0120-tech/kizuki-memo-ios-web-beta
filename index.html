@@ -162,7 +162,7 @@
             <h2 id="handoff-person-name">名前</h2>
             <p id="handoff-pending-count" class="subtle"></p>
           </div>
-          <button class="ghost-button" value="cancel">閉じる</button>
+          <button id="handoff-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
 
         <section class="stack">
@@ -178,11 +178,27 @@
           <p class="subtle">保存すると、今回 AI に送った範囲のメモだけを片づけます。</p>
           <textarea id="handoff-import-text" rows="7" placeholder="AI で整えた文をここへ貼り付け"></textarea>
           <div class="actions">
-            <button class="ghost-button" value="cancel">キャンセル</button>
+            <button id="handoff-cancel-button" class="ghost-button" type="button">キャンセル</button>
             <button id="handoff-save-button" class="primary-button" type="submit">整理ノートに保存</button>
           </div>
         </section>
       </form>
+    </dialog>
+
+    <dialog id="discard-handoff-dialog" class="sheet">
+      <div class="sheet-content stack">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">AI 連携</p>
+            <h2>貼り戻し文を閉じますか</h2>
+          </div>
+        </header>
+        <p class="subtle">まだ保存していない整理文があります。閉じるとこの入力は消えます。</p>
+        <div class="actions">
+          <button id="discard-handoff-cancel-button" class="ghost-button" type="button">キャンセル</button>
+          <button id="discard-handoff-confirm-button" class="primary-button danger" type="button">破棄して閉じる</button>
+        </div>
+      </div>
     </dialog>
 
     <dialog id="settings-dialog" class="sheet">

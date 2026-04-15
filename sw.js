@@ -1,4 +1,4 @@
-const CACHE_NAME = "kizuki-ios-web-beta-v2";
+const CACHE_NAME = "kizuki-ios-web-beta-v3";
 const ASSETS = [
   "./",
   "./index.html",
