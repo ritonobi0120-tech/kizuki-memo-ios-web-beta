@@ -8,7 +8,7 @@ import { matchesPersonSearch } from "./name-search.mjs";
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
-const WEB_BETA_BUILD_LABEL = "2026-04-16 かな検索補助";
+const WEB_BETA_BUILD_LABEL = "2026-04-16 保存復帰と音声ガイド";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
@@ -45,6 +45,7 @@ const elements = {
   focusDraftButton: document.getElementById("focus-draft-button"),
   speechToggleButton: document.getElementById("speech-toggle-button"),
   speechStatus: document.getElementById("speech-status"),
+  speechPreview: document.getElementById("speech-preview"),
   discardCaptureCancelButton: document.getElementById("discard-capture-cancel-button"),
   discardCaptureConfirmButton: document.getElementById("discard-capture-confirm-button"),
   previewPersonName: document.getElementById("preview-person-name"),
@@ -83,6 +84,7 @@ let ui = {
   previewPersonId: null,
   handoffPersonId: null,
   handoffPreparedMemoIds: [],
+  lastSavedPersonId: null,
   pendingDeleteMemoId: null,
   captureDiscardRequested: false,
   handoffDiscardRequested: false,
@@ -92,11 +94,15 @@ const speech = {
   support: detectSpeechSupport(),
   recognition: null,
   active: false,
+  processing: false,
   manuallyStopped: false,
   baseText: "",
   confirmedText: "",
+  liveText: "",
   lastErrorMessage: "",
 };
+
+let recentSaveTimeoutId = 0;
 
 boot();
 
@@ -298,13 +304,22 @@ function renderPeople() {
   elements.emptyState.hidden = visiblePeople.length > 0;
 
   for (const person of visiblePeople) {
+    const isRecentlySaved = person.id === ui.lastSavedPersonId;
+    const badgeMarkup = [
+      isRecentlySaved ? '<span class="tile-badge tile-badge--saved">今の記録</span>' : "",
+      pendingMemoCount(person.id) > 0
+        ? `<span class="tile-badge tile-badge--pending">${pendingMemoCount(person.id)}</span>`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("");
     const tile = document.createElement("button");
     tile.type = "button";
-    tile.className = "person-tile";
+    tile.className = `person-tile${isRecentlySaved ? " is-recently-saved" : ""}`;
     tile.innerHTML = `
       <div class="tile-top">
         <strong>${escapeHtml(person.name)}</strong>
-        ${pendingMemoCount(person.id) > 0 ? `<span class="badge">${pendingMemoCount(person.id)}</span>` : ""}
+        ${badgeMarkup ? `<div class="tile-badges">${badgeMarkup}</div>` : ""}
       </div>
       <div class="tile-meta">${person.lastAccessedAt ? formatDateTime(person.lastAccessedAt) : "まだ記録なし"}</div>
     `;
@@ -328,10 +343,26 @@ function renderSpeechStatus(message = null, tone = "default") {
     ? "大きいマイクボタンを押すと音声入力を試せます。うまくいかない時はキーボードのマイクへ切り替えます。"
     : "この iPhone ではボタン音声入力が使いにくいので、メモ欄を開いてキーボードのマイクを使ってください。";
   const activeMessage = "聞き取り中です。話し終わったらもう一度押すか、そのまま待ってください。";
-  elements.speechToggleButton.textContent = speech.active ? "音声入力を止める" : "マイクで話す";
-  elements.speechStatus.textContent = message || (speech.active ? activeMessage : fallbackMessage);
+  const processingMessage = "聞き取った内容をまとめています。下のメモへ追記するまで少し待ってください。";
+  const resolvedMessage =
+    message || (speech.processing ? processingMessage : speech.active ? activeMessage : fallbackMessage);
+  elements.speechToggleButton.disabled = speech.processing;
+  elements.speechToggleButton.textContent = speech.processing
+    ? "まとめ中…"
+    : speech.active
+      ? "音声入力を止める"
+      : "マイクで話す";
+  elements.speechStatus.textContent = resolvedMessage;
   elements.speechStatus.classList.toggle("is-active", tone === "active");
   elements.speechStatus.classList.toggle("is-warning", tone === "warning");
+  elements.speechStatus.classList.toggle("is-success", tone === "success");
+  renderSpeechPreview();
+}
+
+function renderSpeechPreview() {
+  const previewText = speech.liveText.trim();
+  elements.speechPreview.hidden = previewText.length === 0;
+  elements.speechPreview.textContent = previewText ? `聞き取り中: ${previewText}` : "";
 }
 
 function renderPreview() {
@@ -448,6 +479,7 @@ function saveMemoFromCapture() {
   });
   persistState();
   clearCaptureDraft();
+  markRecentlySaved(personId);
   render();
   toast("メモを保存しました");
 }
@@ -1071,7 +1103,9 @@ function startSpeechRecognition() {
     speech.recognition = recognition;
     speech.baseText = elements.captureDraft.value;
     speech.confirmedText = "";
+    speech.liveText = "";
     speech.lastErrorMessage = "";
+    speech.processing = false;
     speech.manuallyStopped = false;
     recognition.lang = "ja-JP";
     recognition.interimResults = true;
@@ -1093,6 +1127,7 @@ function startSpeechRecognition() {
 function stopSpeechRecognition({ manual, preserveStatus = true }) {
   if (!speech.recognition) {
     speech.active = false;
+    speech.processing = false;
     if (!preserveStatus) renderSpeechStatus();
     return;
   }
@@ -1105,11 +1140,12 @@ function stopSpeechRecognition({ manual, preserveStatus = true }) {
     // ignore
   }
   speech.active = false;
+  speech.processing = true;
 
   if (!preserveStatus) {
     renderSpeechStatus();
   } else if (manual) {
-    renderSpeechStatus("音声入力を止めました。続けたい時はもう一度押してください。");
+    renderSpeechStatus("聞き取った内容をまとめています。下のメモへ追記するまで少し待ってください。", "active");
   }
 }
 
@@ -1127,11 +1163,15 @@ function handleSpeechResult(event) {
   }
 
   const combinedFinal = composeDraftText(speech.baseText, speech.confirmedText);
+  speech.liveText = interimText;
   elements.captureDraft.value = composeDraftText(combinedFinal, interimText);
+  renderSpeechPreview();
 }
 
 function handleSpeechError(event) {
   speech.active = false;
+  speech.processing = false;
+  speech.liveText = "";
   speech.lastErrorMessage = mapSpeechErrorMessage(event.error);
   renderSpeechStatus(speech.lastErrorMessage, "warning");
   if (event.error === "not-allowed" || event.error === "service-not-allowed" || event.error === "unsupported") {
@@ -1141,10 +1181,16 @@ function handleSpeechError(event) {
 
 function handleSpeechEnd() {
   speech.active = false;
+  speech.processing = false;
   speech.recognition = null;
-  elements.captureDraft.value = composeDraftText(speech.baseText, speech.confirmedText);
+  const finalizedDraft = composeDraftText(speech.baseText, speech.confirmedText);
+  const hasAppendedVoice = finalizedDraft !== speech.baseText;
+  speech.liveText = "";
+  elements.captureDraft.value = finalizedDraft;
   if (speech.lastErrorMessage) {
     renderSpeechStatus(speech.lastErrorMessage, "warning");
+  } else if (hasAppendedVoice) {
+    renderSpeechStatus("下のメモに追記しました。続けるなら、もう一度マイクを押してください。", "success");
   } else if (speech.manuallyStopped) {
     renderSpeechStatus("音声入力を止めました。続けたい時はもう一度押してください。");
   } else {
@@ -1153,18 +1199,35 @@ function handleSpeechEnd() {
 }
 
 function fallbackToKeyboardMic() {
+  speech.processing = false;
+  speech.liveText = "";
   elements.captureDraft.focus();
   toast("キーボードのマイクでそのまま話せます");
 }
 
 function resetSpeechSession() {
   speech.active = false;
+  speech.processing = false;
   speech.manuallyStopped = false;
   speech.baseText = "";
   speech.confirmedText = "";
+  speech.liveText = "";
   speech.lastErrorMessage = "";
   speech.recognition = null;
   renderSpeechStatus();
+}
+
+function markRecentlySaved(personId) {
+  ui.lastSavedPersonId = personId;
+  if (recentSaveTimeoutId) {
+    window.clearTimeout(recentSaveTimeoutId);
+  }
+  recentSaveTimeoutId = window.setTimeout(() => {
+    if (ui.lastSavedPersonId === personId) {
+      ui.lastSavedPersonId = null;
+      renderPeople();
+    }
+  }, 3200);
 }
 
 async function writeTextToClipboard(text) {

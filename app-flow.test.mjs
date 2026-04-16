@@ -168,6 +168,87 @@ test("search finds kanji names from hiragana input", async () => {
   });
 });
 
+test("same-flow save keeps search text and highlights the just-saved person", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#search-input").fill("たな");
+    await page.getByRole("button", { name: /田中 はる/ }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await page.locator("#capture-draft").fill("同じ検索のまま戻したいメモです。");
+    await page.getByRole("button", { name: "保存する" }).click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+
+    assert.equal(await page.locator("#search-input").inputValue(), "たな");
+    await assert.doesNotReject(() =>
+      page.locator(".person-tile.is-recently-saved", { hasText: "田中 はる" }).waitFor(),
+    );
+    assert.match(
+      await page.locator(".person-tile.is-recently-saved .tile-badge--saved").textContent(),
+      /今の記録/,
+    );
+  });
+});
+
+test("speech button shows listening and appended states when browser speech api succeeds", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.__fakeSpeech = { instances: [] };
+      class FakeRecognition {
+        constructor() {
+          this.listeners = new Map();
+          window.__fakeSpeech.instances.push(this);
+        }
+
+        addEventListener(type, handler) {
+          const list = this.listeners.get(type) ?? [];
+          list.push(handler);
+          this.listeners.set(type, list);
+        }
+
+        start() {}
+
+        stop() {}
+
+        emit(type, payload) {
+          for (const handler of this.listeners.get(type) ?? []) {
+            handler(payload);
+          }
+        }
+      }
+
+      window.SpeechRecognition = FakeRecognition;
+      window.webkitSpeechRecognition = FakeRecognition;
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "名前を追加" }).click();
+    await page.locator("#person-name-input").fill("音声確認");
+    await page.getByRole("button", { name: "保存" }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+
+    await page.locator("#speech-toggle-button").click();
+    await expectText(page.locator("#speech-status"), /聞き取り中/);
+    await page.waitForFunction(() => window.__fakeSpeech.instances.length > 0);
+
+    await page.evaluate(() => {
+      const recognition = window.__fakeSpeech.instances[0];
+      recognition.emit("result", {
+        resultIndex: 0,
+        results: [
+          {
+            0: { transcript: "音声で入れたメモ" },
+            isFinal: true,
+          },
+        ],
+      });
+      recognition.emit("end", {});
+    });
+
+    await expectText(page.locator("#speech-status"), /追記しました|続きを話せます/);
+    assert.match(await page.locator("#capture-draft").inputValue(), /音声で入れたメモ/);
+  });
+});
+
 test("json export triggers a downloadable backup file", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -191,6 +272,11 @@ test("json export triggers a downloadable backup file", async () => {
     assert.equal(download.suggestedFilename(), `kizuki-ios-web-beta-${expectedDate}.json`);
   });
 });
+
+async function expectText(locator, pattern) {
+  await assert.doesNotReject(() => locator.waitFor());
+  assert.match((await locator.textContent()) ?? "", pattern);
+}
 
 test("install guidance collapses after roster grows", async () => {
   await withPage(async (page, baseUrl) => {
