@@ -3,46 +3,80 @@ import {
   detectSpeechSupport,
   mapSpeechErrorMessage,
 } from "./speech-support.mjs";
-import { matchesPersonSearch } from "./name-search.mjs";
+import {
+  BOARD_FILTERS,
+  applyBoardFilter,
+  buildBoardSummary,
+  buildHandoffBundle as buildUiHandoffBundle,
+  nextMemosForHandoff,
+} from "./ui-logic.mjs";
+import {
+  DEFAULT_FOLDER_PRESETS,
+  buildImportConfirmationMessage,
+  buildStateExport,
+  createDemoState as createDemoStorageState,
+  emptyState as buildEmptyState,
+  loadState as loadStoredState,
+  normalizeImportedState,
+  persistState as persistStoredState,
+  summarizeStateCounts as summarizeStoredStateCounts,
+} from "./storage-logic.mjs";
+import {
+  bindDialogStateEvents as bindDialogStateEventsHelper,
+  bindLongPress as bindLongPressHelper,
+  buildRefreshUrl as buildRefreshUrlHelper,
+  escapeHtml as escapeHtmlHelper,
+  showPreparedDialog as showPreparedDialogHelper,
+  syncDialogBodyState as syncDialogBodyStateHelper,
+} from "./dom-helpers.mjs";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const DEFAULT_SCENES = ["仕事", "生活", "会話", "予定", "体調", "連絡", "気づき", "その他"];
-const WEB_BETA_BUILD_LABEL = "2026-04-16 保存復帰と音声ガイド";
+const WEB_BETA_BUILD_LABEL = "2026-04-21 選択移動と重複整理";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
+const FOLDER_COLOR_CHOICES = [
+  { colorKey: "sky", label: "青", color: "#1A73E8" },
+  { colorKey: "mint", label: "緑", color: "#188038" },
+  { colorKey: "amber", label: "黄", color: "#F29900" },
+  { colorKey: "rose", label: "赤", color: "#D93025" },
+  { colorKey: "sand", label: "紫", color: "#8E63CE" },
+];
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
   capture: document.querySelector("#capture-dialog form"),
   handoff: document.querySelector("#handoff-dialog form"),
-  confirmDelete: document.querySelector("#confirm-delete-dialog form"),
 };
 const dialogs = {
   person: document.getElementById("person-dialog"),
   capture: document.getElementById("capture-dialog"),
   discardCapture: document.getElementById("discard-capture-dialog"),
   preview: document.getElementById("preview-dialog"),
+  moveFolder: document.getElementById("move-folder-dialog"),
   handoff: document.getElementById("handoff-dialog"),
   discardHandoff: document.getElementById("discard-handoff-dialog"),
   settings: document.getElementById("settings-dialog"),
-  confirmDelete: document.getElementById("confirm-delete-dialog"),
 };
 
 const elements = {
   installCard: document.getElementById("install-card"),
-  searchInput: document.getElementById("search-input"),
+  boardSummary: document.getElementById("board-summary"),
+  folderFilterBar: document.getElementById("folder-filter-bar"),
+  boardFilterBar: document.getElementById("board-filter-bar"),
   peopleGrid: document.getElementById("people-grid"),
   emptyState: document.getElementById("empty-state"),
+  selectionCountLabel: document.getElementById("selection-count-label"),
+  selectModeButton: document.getElementById("select-mode-button"),
+  moveSelectedButton: document.getElementById("move-selected-button"),
+  cancelSelectionButton: document.getElementById("cancel-selection-button"),
   addPersonButton: document.getElementById("add-person-button"),
+  addFolderButton: document.getElementById("add-folder-button"),
   openSettingsButton: document.getElementById("open-settings-button"),
   personDialogTitle: document.getElementById("person-dialog-title"),
   personNameInput: document.getElementById("person-name-input"),
   capturePersonName: document.getElementById("capture-person-name"),
-  captureObservedAt: document.getElementById("capture-observed-at"),
+  captureAutosaveStatus: document.getElementById("capture-autosave-status"),
   captureDraft: document.getElementById("capture-draft"),
-  captureScene: document.getElementById("capture-scene"),
   captureCloseButton: document.getElementById("capture-close-button"),
-  captureCancelButton: document.getElementById("capture-cancel-button"),
-  focusDraftButton: document.getElementById("focus-draft-button"),
   speechToggleButton: document.getElementById("speech-toggle-button"),
   speechStatus: document.getElementById("speech-status"),
   speechPreview: document.getElementById("speech-preview"),
@@ -50,10 +84,18 @@ const elements = {
   discardCaptureConfirmButton: document.getElementById("discard-capture-confirm-button"),
   previewPersonName: document.getElementById("preview-person-name"),
   previewSummaryText: document.getElementById("preview-summary-text"),
+  previewFolderChips: document.getElementById("preview-folder-chips"),
+  previewCreateFolderButton: document.getElementById("preview-create-folder-button"),
   previewMemoList: document.getElementById("preview-memo-list"),
+  previewAiSummary: document.getElementById("preview-ai-summary"),
+  previewCopyAiButton: document.getElementById("preview-copy-ai-button"),
   previewQuickRecord: document.getElementById("preview-quick-record"),
   previewAiButton: document.getElementById("preview-ai-button"),
   previewCloseButton: document.getElementById("preview-close-button"),
+  moveFolderSummary: document.getElementById("move-folder-summary"),
+  moveFolderOptions: document.getElementById("move-folder-options"),
+  moveFolderNewButton: document.getElementById("move-folder-new-button"),
+  moveFolderCancelButton: document.getElementById("move-folder-cancel-button"),
   handoffPersonName: document.getElementById("handoff-person-name"),
   handoffPendingCount: document.getElementById("handoff-pending-count"),
   handoffCopyBlock: document.getElementById("handoff-copy-block"),
@@ -71,22 +113,26 @@ const elements = {
   importJsonInput: document.getElementById("import-json-input"),
   seedDemoButton: document.getElementById("seed-demo-button"),
   resetDataButton: document.getElementById("reset-data-button"),
-  confirmDeleteButton: document.getElementById("confirm-delete-button"),
   toast: document.getElementById("toast"),
+  toastMessage: document.getElementById("toast-message"),
+  toastAction: document.getElementById("toast-action"),
 };
 
 let state = loadState();
 let ui = {
-  searchText: "",
+  boardFilter: "all",
+  folderFilter: "all",
   editingPersonId: null,
   capturePersonId: null,
   captureObservedAt: new Date().toISOString(),
+  captureMemoId: null,
+  captureAutosaveTimer: 0,
   previewPersonId: null,
+  selectionMode: false,
+  selectedPersonIds: [],
   handoffPersonId: null,
   handoffPreparedMemoIds: [],
   lastSavedPersonId: null,
-  pendingDeleteMemoId: null,
-  captureDiscardRequested: false,
   handoffDiscardRequested: false,
 };
 
@@ -103,6 +149,10 @@ const speech = {
 };
 
 let recentSaveTimeoutId = 0;
+const toastState = {
+  timer: 0,
+  action: null,
+};
 
 boot();
 
@@ -116,13 +166,40 @@ function boot() {
 }
 
 function bindEvents() {
-  elements.searchInput.addEventListener("input", (event) => {
-    ui.searchText = event.target.value;
+  elements.folderFilterBar.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-folder-filter]");
+    if (!button) return;
+    ui.folderFilter = button.dataset.folderFilter;
+    trimSelectionToVisible();
+    render();
+  });
+  elements.boardFilterBar.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-board-filter]");
+    if (!button) return;
+    ui.boardFilter = button.dataset.boardFilter;
+    trimSelectionToVisible();
+    render();
+  });
+
+  elements.selectModeButton.addEventListener("click", () => {
+    ui.selectionMode = true;
+    ui.selectedPersonIds = [];
+    render();
+  });
+  elements.moveSelectedButton.addEventListener("click", () => {
+    if (ui.selectedPersonIds.length === 0) return;
+    openMoveFolderDialog();
+  });
+  elements.cancelSelectionButton.addEventListener("click", () => {
+    clearSelectionMode();
     render();
   });
 
   elements.addPersonButton.addEventListener("click", () => {
     openPersonDialog();
+  });
+  elements.addFolderButton.addEventListener("click", () => {
+    createFolderFromPrompt();
   });
 
   elements.openSettingsButton.addEventListener("click", () => {
@@ -142,11 +219,6 @@ function bindEvents() {
   });
 
   dialogs.capture.addEventListener("close", () => {
-    if (dialogs.capture.returnValue === "saved") return;
-    if (ui.captureDiscardRequested) {
-      ui.captureDiscardRequested = false;
-      return;
-    }
     clearCaptureDraft();
   });
   dialogs.capture.addEventListener("cancel", (event) => {
@@ -166,17 +238,10 @@ function bindEvents() {
     requestHandoffClose();
   });
 
-  dialogForms.capture.addEventListener("submit", (event) => {
-    event.preventDefault();
-    saveMemoFromCapture();
-    dialogs.capture.close("saved");
-  });
-
-  elements.focusDraftButton.addEventListener("click", () => {
-    elements.captureDraft.focus();
-  });
   elements.captureCloseButton.addEventListener("click", requestCaptureClose);
-  elements.captureCancelButton.addEventListener("click", requestCaptureClose);
+  elements.captureDraft.addEventListener("input", () => {
+    scheduleCaptureAutosave();
+  });
 
   elements.speechToggleButton.addEventListener("click", () => {
     if (speech.active) {
@@ -191,6 +256,10 @@ function bindEvents() {
     dialogs.preview.close();
     if (personId) openCapture(personId);
   });
+  elements.previewCopyAiButton.addEventListener("click", async () => {
+    if (!ui.previewPersonId) return;
+    await copyHandoffBundleForPerson(ui.previewPersonId);
+  });
 
   elements.previewAiButton.addEventListener("click", () => {
     const personId = ui.previewPersonId;
@@ -199,20 +268,22 @@ function bindEvents() {
   });
 
   elements.previewCloseButton.addEventListener("click", () => dialogs.preview.close());
+  elements.previewCreateFolderButton.addEventListener("click", () => {
+    if (!ui.previewPersonId) return;
+    createFolderFromPrompt(ui.previewPersonId);
+  });
+  elements.moveFolderCancelButton.addEventListener("click", () => dialogs.moveFolder.close());
+  elements.moveFolderNewButton.addEventListener("click", () => {
+    const selectedIds = [...ui.selectedPersonIds];
+    dialogs.moveFolder.close("new-folder");
+    createFolderFromPrompt(selectedIds, { skipConfirmAssign: true });
+  });
   elements.handoffCloseButton.addEventListener("click", requestHandoffClose);
   elements.handoffCancelButton.addEventListener("click", requestHandoffClose);
 
   elements.copyHandoffButton.addEventListener("click", async () => {
     if (!ui.handoffPersonId) return;
-    const bundle = buildHandoffBundle(ui.handoffPersonId);
-    try {
-      await writeTextToClipboard(bundle.copyText);
-      ui.handoffPreparedMemoIds = [...bundle.includedMemoIds];
-      renderHandoff();
-      toast("AI に送る文をコピーしました");
-    } catch {
-      toast("コピーできませんでした。長押しでコピーしてください。");
-    }
+    await copyHandoffBundleForPerson(ui.handoffPersonId);
   });
 
   dialogForms.handoff.addEventListener("submit", (event) => {
@@ -238,25 +309,14 @@ function bindEvents() {
     dialogs.settings.close();
     toast("保存データを消しました");
   });
-
-  dialogForms.confirmDelete.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!ui.pendingDeleteMemoId) return;
-    deleteMemo(ui.pendingDeleteMemoId);
-    ui.pendingDeleteMemoId = null;
-    dialogs.confirmDelete.close("confirm");
+  elements.toastAction.addEventListener("click", () => {
+    const action = toastState.action;
+    hideToast();
+    if (action) {
+      action();
+    }
   });
 
-  dialogs.confirmDelete.addEventListener("close", () => {
-    if (dialogs.confirmDelete.returnValue === "confirm") return;
-    ui.pendingDeleteMemoId = null;
-  });
-
-  elements.discardCaptureCancelButton.addEventListener("click", () => dialogs.discardCapture.close());
-  elements.discardCaptureConfirmButton.addEventListener("click", () => {
-    dialogs.discardCapture.close("confirm");
-    forceCloseCapture();
-  });
   elements.discardHandoffCancelButton.addEventListener("click", () => dialogs.discardHandoff.close());
   elements.discardHandoffConfirmButton.addEventListener("click", () => {
     dialogs.discardHandoff.close("confirm");
@@ -267,6 +327,7 @@ function bindEvents() {
 function render() {
   renderSettingsMeta();
   renderInstallCard();
+  renderSelectionActions();
   renderPeople();
   renderCapture();
   renderPreview();
@@ -283,29 +344,44 @@ function renderSettingsMeta() {
   elements.webBuildLabel.textContent = `現在の版: ${WEB_BETA_BUILD_LABEL}`;
 }
 
-function renderPeople() {
-  const visiblePeople = state.people
-    .filter((person) =>
-      matchesPersonSearch({
-        query: ui.searchText,
-        name: person.name,
-        alias: person.alias ?? "",
-        aliasCode: person.aliasCode ?? "",
-        kana: person.kana ?? "",
-      }),
-    )
-    .sort((a, b) => {
-      const aTime = a.lastAccessedAt ?? "";
-      const bTime = b.lastAccessedAt ?? "";
-      return bTime.localeCompare(aTime) || a.sortOrder - b.sortOrder;
-    });
+function renderSelectionActions() {
+  const selectedCount = ui.selectedPersonIds.length;
+  elements.selectionCountLabel.hidden = !ui.selectionMode;
+  elements.selectionCountLabel.textContent = `${selectedCount}人を選択中`;
+  elements.selectModeButton.hidden = ui.selectionMode;
+  elements.moveSelectedButton.hidden = !ui.selectionMode;
+  elements.cancelSelectionButton.hidden = !ui.selectionMode;
+  elements.moveSelectedButton.disabled = selectedCount === 0;
+  elements.addPersonButton.hidden = ui.selectionMode;
+  elements.addFolderButton.hidden = ui.selectionMode;
+}
 
+function renderPeople() {
+  const visiblePeople = currentVisiblePeople();
+
+  renderBoardSummary(
+    buildBoardSummary({
+      people: state.people,
+      getPendingCount: pendingMemoCount,
+      folderCount: state.folders.length,
+    }),
+  );
+  renderFolderFilters();
+  renderBoardFilters();
   elements.peopleGrid.innerHTML = "";
   elements.emptyState.hidden = visiblePeople.length > 0;
+  elements.emptyState.innerHTML =
+    state.people.length === 0
+      ? "<p>まだ名前がありません。まずは 1 人追加してください。</p>"
+      : "<p>このフォルダにはまだ名前がありません。フォルダを戻すか、別の名前を入れてください。</p>";
 
+  const showFolderMeta = ui.folderFilter === "all";
   for (const person of visiblePeople) {
     const isRecentlySaved = person.id === ui.lastSavedPersonId;
+    const isSelected = ui.selectedPersonIds.includes(person.id);
+    const folder = folderFor(person.folderId);
     const badgeMarkup = [
+      isSelected ? '<span class="tile-badge tile-badge--selected">選択中</span>' : "",
       isRecentlySaved ? '<span class="tile-badge tile-badge--saved">今の記録</span>' : "",
       pendingMemoCount(person.id) > 0
         ? `<span class="tile-badge tile-badge--pending">${pendingMemoCount(person.id)}</span>`
@@ -315,15 +391,21 @@ function renderPeople() {
       .join("");
     const tile = document.createElement("button");
     tile.type = "button";
-    tile.className = `person-tile${isRecentlySaved ? " is-recently-saved" : ""}`;
+    tile.className = `person-tile${isRecentlySaved ? " is-recently-saved" : ""}${ui.selectionMode ? " is-selection-mode" : ""}${isSelected ? " is-selected" : ""}`;
     tile.innerHTML = `
       <div class="tile-top">
         <strong>${escapeHtml(person.name)}</strong>
         ${badgeMarkup ? `<div class="tile-badges">${badgeMarkup}</div>` : ""}
       </div>
-      <div class="tile-meta">${person.lastAccessedAt ? formatDateTime(person.lastAccessedAt) : "まだ記録なし"}</div>
+      ${showFolderMeta ? `<div class="tile-meta">${folder ? `${folderIconMarkup(folder)}${escapeHtml(folder.name)}` : "未分類"}</div>` : ""}
     `;
-    bindLongPress(tile, () => openPreview(person.id), () => openCapture(person.id));
+    if (ui.selectionMode) {
+      tile.addEventListener("click", () => {
+        togglePersonSelection(person.id);
+      });
+    } else {
+      bindLongPress(tile, () => openPreview(person.id), () => openCapture(person.id));
+    }
     elements.peopleGrid.appendChild(tile);
   }
 }
@@ -333,25 +415,26 @@ function renderCapture() {
   const person = findPerson(ui.capturePersonId);
   if (!person) return;
   elements.capturePersonName.textContent = person.name;
-  elements.captureObservedAt.textContent = formatDateTime(ui.captureObservedAt);
-  fillSceneSelect();
+  elements.captureAutosaveStatus.textContent =
+    ui.captureMemoId ? "自動保存済み。このまま閉じても残ります。" : "話すか入力すると自動で保存します。";
   renderSpeechStatus();
 }
 
 function renderSpeechStatus(message = null, tone = "default") {
-  const fallbackMessage = speech.support.available
-    ? "大きいマイクボタンを押すと音声入力を試せます。うまくいかない時はキーボードのマイクへ切り替えます。"
-    : "この iPhone ではボタン音声入力が使いにくいので、メモ欄を開いてキーボードのマイクを使ってください。";
-  const activeMessage = "聞き取り中です。話し終わったらもう一度押すか、そのまま待ってください。";
+  const readyMessage = "スタンバイOK。押したらすぐ話せます。";
+  const activeMessage = "録音中です。話し終わったらもう一度押すか、そのまま待ってください。";
   const processingMessage = "聞き取った内容をまとめています。下のメモへ追記するまで少し待ってください。";
   const resolvedMessage =
-    message || (speech.processing ? processingMessage : speech.active ? activeMessage : fallbackMessage);
-  elements.speechToggleButton.disabled = speech.processing;
+    message || (speech.processing ? processingMessage : speech.active ? activeMessage : readyMessage);
+  elements.speechToggleButton.disabled = false;
   elements.speechToggleButton.textContent = speech.processing
     ? "まとめ中…"
     : speech.active
-      ? "音声入力を止める"
-      : "マイクで話す";
+      ? "止める"
+      : "スタンバイOK";
+  elements.speechToggleButton.classList.toggle("is-listening", speech.active);
+  elements.speechToggleButton.classList.toggle("is-busy", speech.processing);
+  elements.speechToggleButton.classList.toggle("is-standby", !speech.active && !speech.processing);
   elements.speechStatus.textContent = resolvedMessage;
   elements.speechStatus.classList.toggle("is-active", tone === "active");
   elements.speechStatus.classList.toggle("is-warning", tone === "warning");
@@ -369,8 +452,15 @@ function renderPreview() {
   if (!ui.previewPersonId) return;
   const person = findPerson(ui.previewPersonId);
   if (!person) return;
+  const bundle = currentHandoffBundle(person.id);
   elements.previewPersonName.textContent = person.name;
   elements.previewSummaryText.textContent = summaryFor(person.id)?.summaryText || "整理ノートはまだありません";
+  renderPreviewFolders(person);
+  elements.previewAiSummary.textContent =
+    bundle.includedMemoIds.length > 0
+      ? `未整理メモ ${bundle.includedMemoIds.length} 件をそのままコピーできます`
+      : "未整理のメモはありません。必要なら整理ノートだけ見直せます。";
+  elements.previewCopyAiButton.textContent = `AI 用にコピー（${bundle.includedMemoIds.length}件）`;
   elements.previewMemoList.innerHTML = "";
   const memos = memosFor(person.id);
   if (memos.length === 0) {
@@ -386,11 +476,45 @@ function renderPreview() {
   }
 }
 
+function renderPreviewFolders(person) {
+  const folderButtons = [
+    { id: "unassigned", label: "未分類", selected: !person.folderId },
+    ...state.folders.map((folder) => ({
+      id: folder.id,
+      label: folder.name,
+      iconMarkup: folderIconMarkup(folder),
+      selected: person.folderId === folder.id,
+    })),
+  ];
+  elements.previewFolderChips.innerHTML = folderButtons
+    .map(
+      (folder) => `
+        <button
+          type="button"
+          class="filter-pill${folder.selected ? " is-active" : ""}"
+          data-preview-folder-id="${escapeHtml(String(folder.id))}"
+        >
+          ${folder.iconMarkup || ""}${escapeHtml(folder.label)}
+        </button>
+      `,
+    )
+    .join("");
+  elements.previewFolderChips.querySelectorAll("[data-preview-folder-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!ui.previewPersonId) return;
+      const nextFolderId = button.dataset.previewFolderId;
+      assignPersonFolder(ui.previewPersonId, nextFolderId === "unassigned" ? null : nextFolderId);
+      renderPreview();
+      renderPeople();
+    });
+  });
+}
+
 function renderHandoff() {
   if (!ui.handoffPersonId) return;
   const person = findPerson(ui.handoffPersonId);
   if (!person) return;
-  const bundle = buildHandoffBundle(person.id);
+  const bundle = currentHandoffBundle(person.id);
   elements.handoffPersonName.textContent = person.name;
   elements.handoffPendingCount.textContent = `未整理メモ ${bundle.includedMemoIds.length} 件`;
   elements.handoffCopyBlock.textContent = bundle.copyText;
@@ -409,9 +533,9 @@ function openCapture(personId) {
   const person = findPerson(personId);
   if (!person) return;
   ui.capturePersonId = personId;
+  ui.captureMemoId = null;
   ui.captureObservedAt = new Date().toISOString();
   elements.captureDraft.value = "";
-  elements.captureScene.value = "";
   resetSpeechSession();
   renderCapture();
   showPreparedDialog(dialogs.capture);
@@ -426,8 +550,12 @@ function openPreview(personId) {
 }
 
 function openHandoff(personId) {
-  ui.handoffPersonId = personId;
-  ui.handoffPreparedMemoIds = buildHandoffBundle(personId).includedMemoIds;
+  const preparedForSamePerson = ui.handoffPersonId === personId && ui.handoffPreparedMemoIds.length > 0;
+  if (!preparedForSamePerson) {
+    prepareHandoffBundle(personId);
+  } else {
+    ui.handoffPersonId = personId;
+  }
   elements.handoffImportText.value = "";
   renderHandoff();
   showPreparedDialog(dialogs.handoff);
@@ -448,6 +576,8 @@ function savePerson(name) {
     const person = {
       id: crypto.randomUUID(),
       name,
+      folderId: ui.folderFilter !== "all" && ui.folderFilter !== "unassigned" ? ui.folderFilter : null,
+      isPinned: false,
       sortOrder: state.people.length,
       createdAt: now,
       updatedAt: now,
@@ -460,59 +590,76 @@ function savePerson(name) {
   }
 }
 
-function saveMemoFromCapture() {
-  const personId = ui.capturePersonId;
-  const text = elements.captureDraft.value.trim();
-  if (!personId || !text) {
-    clearCaptureDraft();
-    return;
-  }
-  const observedAt = ui.captureObservedAt;
-  state.memos.push({
-    id: crypto.randomUUID(),
-    personId,
-    observedAt,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-    rawText: text,
-    scene: elements.captureScene.value || "",
-  });
-  persistState();
-  clearCaptureDraft();
-  markRecentlySaved(personId);
-  render();
-  toast("メモを保存しました");
-}
-
 function clearCaptureDraft() {
+  if (ui.captureAutosaveTimer) {
+    window.clearTimeout(ui.captureAutosaveTimer);
+    ui.captureAutosaveTimer = 0;
+  }
   stopSpeechRecognition({ manual: false, preserveStatus: false });
   ui.capturePersonId = null;
+  ui.captureMemoId = null;
   elements.captureDraft.value = "";
-  elements.captureScene.value = "";
   resetSpeechSession();
 }
 
-function hasCaptureDraftChanges() {
-  return (
-    elements.captureDraft.value.trim().length > 0 ||
-    elements.captureScene.value.trim().length > 0 ||
-    speech.confirmedText.trim().length > 0 ||
-    speech.active
-  );
+function scheduleCaptureAutosave() {
+  elements.captureAutosaveStatus.textContent = "自動保存の準備中です…";
+  if (ui.captureAutosaveTimer) {
+    window.clearTimeout(ui.captureAutosaveTimer);
+  }
+  ui.captureAutosaveTimer = window.setTimeout(() => {
+    persistCaptureMemo();
+  }, 650);
 }
 
 function requestCaptureClose() {
-  if (hasCaptureDraftChanges()) {
-    showPreparedDialog(dialogs.discardCapture);
-    return;
-  }
-  forceCloseCapture();
+  const didPersist = persistCaptureMemo();
+  dialogs.capture.close(didPersist ? "saved" : "close");
 }
 
-function forceCloseCapture() {
-  ui.captureDiscardRequested = true;
-  dialogs.capture.close("discard");
-  clearCaptureDraft();
+function persistCaptureMemo() {
+  const personId = ui.capturePersonId;
+  const text = elements.captureDraft.value.trim();
+  if (ui.captureAutosaveTimer) {
+    window.clearTimeout(ui.captureAutosaveTimer);
+    ui.captureAutosaveTimer = 0;
+  }
+  if (!personId || !text) {
+    elements.captureAutosaveStatus.textContent = "話すか入力すると自動で保存します。";
+    return false;
+  }
+
+  const observedAt = ui.captureObservedAt || new Date().toISOString();
+  const now = new Date().toISOString();
+  if (ui.captureMemoId) {
+    const existing = state.memos.find((memo) => memo.id === ui.captureMemoId);
+    if (existing) {
+      existing.rawText = text;
+      existing.updatedAt = now;
+    }
+  } else {
+    const memoId = crypto.randomUUID();
+    state.memos.push({
+      id: memoId,
+      personId,
+      observedAt,
+      createdAt: observedAt,
+      updatedAt: now,
+      rawText: text,
+      scene: "",
+    });
+    ui.captureMemoId = memoId;
+  }
+  const person = findPerson(personId);
+  if (person) {
+    person.lastAccessedAt = now;
+    person.updatedAt = now;
+  }
+  persistState();
+  elements.captureAutosaveStatus.textContent = "自動保存済み。戻ってもこのメモは残ります。";
+  markRecentlySaved(personId);
+  renderPeople();
+  return true;
 }
 
 function clearHandoffDraft() {
@@ -565,11 +712,23 @@ function saveSummaryFromHandoff() {
 }
 
 function deleteMemo(memoId) {
+  const deletedMemo = state.memos.find((memo) => memo.id === memoId);
+  if (!deletedMemo) return;
   state.memos = state.memos.filter((memo) => memo.id !== memoId);
   persistState();
   render();
   if (dialogs.preview.open) renderPreview();
-  toast("メモを削除しました");
+  toast("メモを削除しました", {
+    actionLabel: "もとに戻す",
+    duration: 4200,
+    onAction: () => {
+      state.memos.push({ ...deletedMemo });
+      persistState();
+      render();
+      if (dialogs.preview.open) renderPreview();
+      toast("メモを戻しました");
+    },
+  });
 }
 
 function createSwipeMemoCard(memo) {
@@ -577,7 +736,7 @@ function createSwipeMemoCard(memo) {
   shell.className = "swipe-shell";
   shell.innerHTML = `
     <div class="swipe-background">
-      <button class="swipe-delete" type="button">削除</button>
+      <div class="swipe-delete-label">削除</div>
     </div>
     <article class="memo-card">
       <div class="memo-time">${formatDateTime(memo.observedAt)}</div>
@@ -585,7 +744,6 @@ function createSwipeMemoCard(memo) {
     </article>
   `;
   const card = shell.querySelector(".memo-card");
-  const deleteButton = shell.querySelector(".swipe-delete");
   let startX = 0;
   let deltaX = 0;
   let dragging = false;
@@ -606,49 +764,235 @@ function createSwipeMemoCard(memo) {
   const finishDrag = () => {
     if (!dragging) return;
     dragging = false;
-    card.classList.toggle("revealed", deltaX < -72);
+    if (deltaX < -72) {
+      deleteMemo(memo.id);
+      return;
+    }
     card.style.transform = "";
   };
   card.addEventListener("pointerup", finishDrag);
   card.addEventListener("pointercancel", finishDrag);
-  deleteButton.addEventListener("click", () => {
-    ui.pendingDeleteMemoId = memo.id;
-    dialogs.confirmDelete.showModal();
-  });
   return shell;
 }
 
 function buildHandoffBundle(personId) {
   const person = findPerson(personId);
   const summary = summaryFor(personId);
-  const includedMemos = memosFor(personId).filter((memo) => {
-    if (!summary?.summaryUpdatedAt) return true;
-    return memo.observedAt > summary.summaryUpdatedAt;
+  return buildUiHandoffBundle({
+    personName: person?.name ?? "不明",
+    summaryText: summary?.summaryText || "なし",
+    summaryUpdatedAt: summary?.summaryUpdatedAt ?? null,
+    memos: memosFor(personId),
+    preparedMemoIds: ui.handoffPersonId === personId ? ui.handoffPreparedMemoIds : [],
+    exportedAt: new Date().toISOString(),
+    formatDateTime,
   });
-  const exportedAt = new Date().toISOString();
-  const lines = [
-    "# きづきメモ",
-    `- 名前: ${person?.name ?? "不明"}`,
-    `- 出力日時: ${formatDateTime(exportedAt)}`,
-    `- 整理ノート最終更新: ${summary?.summaryUpdatedAt ? formatDateTime(summary.summaryUpdatedAt) : "未作成"}`,
-    "",
-    "## 現在の整理ノート",
-    summary?.summaryText || "なし",
-    "",
-    "## 新規メモ",
-    ...(includedMemos.length
-      ? includedMemos.map((memo) => `- ${formatDateTime(memo.observedAt)} ${memo.scene ? `[${memo.scene}] ` : ""}${memo.rawText}`)
-      : ["- なし"]),
+}
+
+function renderBoardSummary({ totalCount, pendingCount, folderCount }) {
+  elements.boardSummary.innerHTML = [
+    summaryPillMarkup("登録", totalCount),
+    summaryPillMarkup("未整理あり", pendingCount),
+    summaryPillMarkup("フォルダ", folderCount),
+  ].join("");
+}
+
+function summaryPillMarkup(label, value) {
+  return `
+    <div class="summary-pill">
+      <span class="summary-pill-label">${escapeHtml(label)}</span>
+      <strong class="summary-pill-value">${value}</strong>
+    </div>
+  `;
+}
+
+function renderBoardFilters() {
+  elements.boardFilterBar.innerHTML = BOARD_FILTERS.map(
+    (filter) => `
+      <button
+        type="button"
+        class="filter-pill${ui.boardFilter === filter.id ? " is-active" : ""}"
+        data-board-filter="${filter.id}"
+      >
+        ${escapeHtml(filter.label)}
+      </button>
+    `,
+  ).join("");
+}
+
+function renderFolderFilters() {
+  const filterButtons = [
+    { id: "all", label: "すべて" },
+    { id: "unassigned", label: "未分類" },
+    ...state.folders.map((folder) => ({
+      id: folder.id,
+      label: folder.name,
+      iconMarkup: folderIconMarkup(folder),
+    })),
   ];
-  const plain = lines.join("\n");
-  return {
-    copyText: `\`\`\`markdown\n${plain}\n\`\`\``,
-    includedMemoIds: includedMemos.map((memo) => memo.id),
+  elements.folderFilterBar.innerHTML = filterButtons
+    .map(
+      (filter) => `
+        <button
+          type="button"
+          class="filter-pill${ui.folderFilter === filter.id ? " is-active" : ""}"
+          data-folder-filter="${escapeHtml(String(filter.id))}"
+        >
+          ${filter.iconMarkup || ""}${escapeHtml(filter.label)}
+        </button>
+      `,
+    )
+    .join("");
+}
+
+function createFolderFromPrompt(assignPersonIdOrIds = null, { skipConfirmAssign = false } = {}) {
+  const name = window.prompt("フォルダ名を入れてください");
+  if (!name || !name.trim()) return;
+  const colorChoice = pickFolderColorChoice(state.folders.length % FOLDER_COLOR_CHOICES.length);
+  if (!colorChoice) return;
+  const preset = DEFAULT_FOLDER_PRESETS[state.folders.length % DEFAULT_FOLDER_PRESETS.length];
+  const assignPersonIds = normalizeFolderAssigneeIds(assignPersonIdOrIds);
+  const now = new Date().toISOString();
+  const folder = {
+    id: crypto.randomUUID(),
+    name: name.trim(),
+    icon: preset.icon,
+    colorKey: colorChoice.colorKey,
+    sortOrder: state.folders.length,
+    createdAt: now,
+    updatedAt: now,
   };
+  state.folders.push(folder);
+  if (assignPersonIds.length > 1) {
+    const confirmAssign = skipConfirmAssign
+      ? true
+      : window.confirm(`今見えている ${assignPersonIds.length} 人をこのフォルダへ入れますか？`);
+    if (confirmAssign) {
+      assignPeopleToFolder(assignPersonIds, folder.id, { skipRender: true });
+    }
+  } else if (assignPersonIds.length === 1) {
+    assignPersonFolder(assignPersonIds[0], folder.id, { skipRender: true });
+  }
+  persistState();
+  if (assignPersonIds.length > 0) {
+    ui.folderFilter = folder.id;
+  }
+  clearSelectionMode();
+  render();
+  toast("フォルダを作りました");
+}
+
+function openMoveFolderDialog() {
+  renderMoveFolderOptions();
+  showPreparedDialog(dialogs.moveFolder);
+}
+
+function renderMoveFolderOptions() {
+  const selectedCount = ui.selectedPersonIds.length;
+  elements.moveFolderSummary.textContent = `${selectedCount}人をまとめて移せます`;
+  const folderButtons = [
+    { id: "unassigned", label: "未分類" },
+    ...state.folders.map((folder) => ({
+      id: folder.id,
+      label: folder.name,
+      iconMarkup: folderIconMarkup(folder),
+    })),
+  ];
+  elements.moveFolderOptions.innerHTML = folderButtons
+    .map(
+      (folder) => `
+        <button
+          type="button"
+          class="filter-pill"
+          data-move-folder-id="${escapeHtml(String(folder.id))}"
+        >
+          ${folder.iconMarkup || ""}${escapeHtml(folder.label)}
+        </button>
+      `,
+    )
+    .join("");
+  elements.moveFolderOptions.querySelectorAll("[data-move-folder-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextFolderId = button.dataset.moveFolderId;
+      moveSelectedPeopleToFolder(nextFolderId === "unassigned" ? null : nextFolderId);
+    });
+  });
+}
+
+function applyFolderFilter(people) {
+  if (ui.folderFilter === "all") {
+    return people;
+  }
+  if (ui.folderFilter === "unassigned") {
+    return people.filter((person) => !person.folderId);
+  }
+  return people.filter((person) => person.folderId === ui.folderFilter);
+}
+
+function assignPersonFolder(personId, folderId, { skipRender = false } = {}) {
+  const person = findPerson(personId);
+  if (!person) return;
+  person.folderId = folderId;
+  person.updatedAt = new Date().toISOString();
+  persistState();
+  if (!skipRender) {
+    render();
+  }
+}
+
+function assignPeopleToFolder(personIds, folderId, { skipRender = false } = {}) {
+  personIds.forEach((personId) => {
+    const person = findPerson(personId);
+    if (!person) return;
+    person.folderId = folderId;
+    person.updatedAt = new Date().toISOString();
+  });
+  persistState();
+  if (!skipRender) {
+    render();
+  }
+}
+
+function moveSelectedPeopleToFolder(folderId) {
+  if (ui.selectedPersonIds.length === 0) return;
+  assignPeopleToFolder(ui.selectedPersonIds, folderId, { skipRender: true });
+  ui.folderFilter = folderId || "unassigned";
+  dialogs.moveFolder.close("moved");
+  clearSelectionMode();
+  render();
+  toast("フォルダへ移しました");
+}
+
+function prepareHandoffBundle(personId) {
+  ui.handoffPersonId = personId;
+  ui.handoffPreparedMemoIds = [];
+  const bundle = buildHandoffBundle(personId);
+  ui.handoffPreparedMemoIds = [...bundle.includedMemoIds];
+  return bundle;
+}
+
+function currentHandoffBundle(personId) {
+  return buildHandoffBundle(personId);
+}
+
+async function copyHandoffBundleForPerson(personId) {
+  const bundle = prepareHandoffBundle(personId);
+  try {
+    await writeTextToClipboard(bundle.copyText);
+    renderPreview();
+    renderHandoff();
+    toast("AI に送る文をコピーしました");
+  } catch {
+    toast("コピーできませんでした。長押しでコピーしてください。");
+  }
 }
 
 function pendingMemoCount(personId) {
-  return buildHandoffBundle(personId).includedMemoIds.length;
+  const summary = summaryFor(personId);
+  return nextMemosForHandoff({
+    memos: memosFor(personId),
+    summaryUpdatedAt: summary?.summaryUpdatedAt ?? null,
+  }).length;
 }
 
 function memosFor(personId) {
@@ -665,6 +1009,70 @@ function findPerson(personId) {
   return state.people.find((person) => person.id === personId) || null;
 }
 
+function folderFor(folderId) {
+  if (!folderId) return null;
+  return state.folders.find((folder) => folder.id === folderId) || null;
+}
+
+function currentVisiblePeople() {
+  const folderScopedPeople = applyFolderFilter(state.people).sort((a, b) => a.sortOrder - b.sortOrder);
+  return applyBoardFilter({
+    people: folderScopedPeople,
+    filter: ui.boardFilter,
+    getPendingCount: pendingMemoCount,
+  });
+}
+
+function folderColorValue(colorKey) {
+  return FOLDER_COLOR_CHOICES.find((item) => item.colorKey === colorKey)?.color || FOLDER_COLOR_CHOICES[0].color;
+}
+
+function folderIconMarkup(folder) {
+  return `<span class="folder-chip-icon" style="color: ${folderColorValue(folder.colorKey)}">${escapeHtml(folder.icon || "📁")}</span>`;
+}
+
+function pickFolderColorChoice(defaultIndex = 0) {
+  const defaultChoice = FOLDER_COLOR_CHOICES[defaultIndex % FOLDER_COLOR_CHOICES.length];
+  const answer = window.prompt(
+    "フォルダの色を選んでください: 青 / 緑 / 黄 / 赤 / 紫",
+    defaultChoice.label,
+  );
+  if (answer == null) return null;
+  const normalized = answer.trim();
+  return (
+    FOLDER_COLOR_CHOICES.find((item) => item.label === normalized) ||
+    FOLDER_COLOR_CHOICES.find((item) => item.colorKey === normalized) ||
+    defaultChoice
+  );
+}
+
+function normalizeFolderAssigneeIds(assignPersonIdOrIds) {
+  if (Array.isArray(assignPersonIdOrIds)) {
+    return [...new Set(assignPersonIdOrIds.filter(Boolean))];
+  }
+  return assignPersonIdOrIds ? [assignPersonIdOrIds] : [];
+}
+
+function togglePersonSelection(personId) {
+  if (ui.selectedPersonIds.includes(personId)) {
+    ui.selectedPersonIds = ui.selectedPersonIds.filter((id) => id !== personId);
+  } else {
+    ui.selectedPersonIds = [...ui.selectedPersonIds, personId];
+  }
+  render();
+}
+
+function clearSelectionMode() {
+  ui.selectionMode = false;
+  ui.selectedPersonIds = [];
+}
+
+function trimSelectionToVisible() {
+  if (!ui.selectionMode) return;
+  const visibleIds = new Set(currentVisiblePeople().map((person) => person.id));
+  ui.selectedPersonIds = ui.selectedPersonIds.filter((id) => visibleIds.has(id));
+}
+
 function markOpened(personId) {
   const person = findPerson(personId);
   if (!person) return;
@@ -674,27 +1082,17 @@ function markOpened(personId) {
   renderPeople();
 }
 
-function fillSceneSelect() {
-  const current = elements.captureScene.value;
-  elements.captureScene.innerHTML = `<option value="">選ばない</option>${state.scenes
-    .map((scene) => `<option value="${escapeHtml(scene)}">${escapeHtml(scene)}</option>`)
-    .join("")}`;
-  elements.captureScene.value = current;
-}
-
 function exportStateAsJson() {
-  const payload = {
-    app: "kizuki-ios-web-beta",
+  const exported = buildStateExport({
+    state,
+    appId: "kizuki-ios-web-beta",
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    exportedAt: new Date().toISOString(),
-    recordCounts: summarizeStateCounts(state),
-    state: normalizeImportedState(state),
-  };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  });
+  const blob = new Blob([exported.jsonText], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `kizuki-ios-web-beta-${formatFilenameDate(new Date())}.json`;
+  anchor.download = exported.filename;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -728,12 +1126,7 @@ async function importStateFromJson(event) {
 }
 
 function emptyState() {
-  return {
-    people: [],
-    memos: [],
-    summaries: [],
-    scenes: [...DEFAULT_SCENES],
-  };
+  return buildEmptyState();
 }
 
 function ensureSeeded() {
@@ -743,68 +1136,22 @@ function ensureSeeded() {
 }
 
 function createDemoState() {
-  const now = Date.now();
-  const people = [
-    makePerson("田中 はる", 0, now - 1800_000),
-    makePerson("佐藤 あおい", 1, now - 7200_000),
-    makePerson("鈴木 けん", 2, now - 8600_000),
-  ];
-  return {
-    people,
-    memos: [
-      makeMemo(people[0].id, now - 1800_000, "朝の会で自分から話し始めていた", "会話"),
-      makeMemo(people[0].id, now - 900_000, "切り替えの声かけで落ち着いて動けた", "生活"),
-      makeMemo(people[1].id, now - 5400_000, "予定の変更で少し迷っていた", "予定"),
-      makeMemo(people[2].id, now - 3600_000, "友だちに声をかけて一緒に片づけていた", "生活"),
-    ],
-    summaries: [
-      {
-        personId: people[0].id,
-        summaryText: "最近は自分から動き始める場面が少しずつ増えている。",
-        summaryUpdatedAt: new Date(now - 2400_000).toISOString(),
-      },
-    ],
-    scenes: [...DEFAULT_SCENES],
-  };
-}
-
-function makePerson(name, sortOrder, lastAccessedAtMs) {
-  const now = new Date().toISOString();
-  return {
-    id: crypto.randomUUID(),
-    name,
-    sortOrder,
-    createdAt: now,
-    updatedAt: now,
-    lastAccessedAt: new Date(lastAccessedAtMs).toISOString(),
-  };
-}
-
-function makeMemo(personId, observedAtMs, rawText, scene) {
-  const observedAt = new Date(observedAtMs).toISOString();
-  return {
-    id: crypto.randomUUID(),
-    personId,
-    observedAt,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-    rawText,
-    scene,
-  };
+  return createDemoStorageState();
 }
 
 function loadState() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (parsed) return normalizeImportedState(parsed);
-  } catch {
-    // ignore and reseed
-  }
-  return emptyState();
+  return loadStoredState({
+    storage: window.localStorage,
+    storageKey: STORAGE_KEY,
+  });
 }
 
 function persistState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeImportedState(state)));
+  persistStoredState({
+    storage: window.localStorage,
+    storageKey: STORAGE_KEY,
+    state,
+  });
 }
 
 function formatDateTime(value) {
@@ -816,200 +1163,49 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-function toast(message) {
-  elements.toast.textContent = message;
+function toast(message, options = {}) {
+  const { actionLabel = "", onAction = null, duration = 2600 } = options;
+  mountToast();
+  elements.toastMessage.textContent = message;
+  elements.toastAction.hidden = actionLabel.length === 0;
+  elements.toastAction.textContent = actionLabel;
+  toastState.action = onAction;
   elements.toast.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = window.setTimeout(() => {
-    elements.toast.hidden = true;
-  }, 2600);
+  clearTimeout(toastState.timer);
+  toastState.timer = window.setTimeout(() => {
+    hideToast();
+  }, duration);
+}
+
+function hideToast() {
+  clearTimeout(toastState.timer);
+  toastState.timer = 0;
+  toastState.action = null;
+  elements.toast.hidden = true;
+  elements.toastMessage.textContent = "";
+  elements.toastAction.hidden = true;
+  elements.toastAction.textContent = "";
+}
+
+function mountToast() {
+  const host =
+    Object.values(dialogs).find((dialog) => dialog?.open)?.querySelector(".sheet-content") || document.body;
+  if (elements.toast.parentElement !== host) {
+    host.appendChild(elements.toast);
+  }
+  elements.toast.classList.toggle("toast--in-sheet", host !== document.body);
 }
 
 function bindLongPress(node, onLongPress, onTap) {
-  let timer = null;
-  let longPressed = false;
-  node.addEventListener("pointerdown", () => {
-    longPressed = false;
-    timer = window.setTimeout(() => {
-      longPressed = true;
-      onLongPress();
-    }, 420);
-  });
-  const cancel = () => {
-    window.clearTimeout(timer);
-  };
-  node.addEventListener("pointerup", () => {
-    if (!longPressed) onTap();
-    cancel();
-  });
-  node.addEventListener("pointerleave", cancel);
-  node.addEventListener("pointercancel", cancel);
-  node.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-    onLongPress();
-  });
+  bindLongPressHelper(node, onLongPress, onTap);
 }
 
 function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
+  return escapeHtmlHelper(value);
 }
 
 function summarizeStateCounts(sourceState) {
-  const normalized = normalizeImportedState(sourceState);
-  return {
-    people: normalized.people.length,
-    memos: normalized.memos.length,
-    summaries: normalized.summaries.length,
-    scenes: normalized.scenes.length,
-  };
-}
-
-function buildImportConfirmationMessage(fileName, counts) {
-  return [
-    `${fileName} を読み込みます。`,
-    "この beta の保存データを読み込んだ内容で置き換えます。",
-    `- 名前 ${counts.people} 人`,
-    `- メモ ${counts.memos} 件`,
-    `- 整理ノート ${counts.summaries} 件`,
-    `- 場面 ${counts.scenes} 件`,
-    "続けますか。",
-  ].join("\n");
-}
-
-function normalizeImportedState(candidateState) {
-  if (!candidateState || typeof candidateState !== "object") throw new Error("invalid");
-  const peopleSource = Array.isArray(candidateState.people) ? candidateState.people : null;
-  const memosSource = Array.isArray(candidateState.memos) ? candidateState.memos : null;
-  const summariesSource = Array.isArray(candidateState.summaries) ? candidateState.summaries : null;
-  if (!peopleSource || !memosSource || !summariesSource) throw new Error("invalid");
-
-  const usedPersonIds = new Set();
-  const people = peopleSource
-    .map((person, index) => normalizeImportedPerson(person, index, usedPersonIds))
-    .filter(Boolean);
-  const personIds = new Set(people.map((person) => person.id));
-
-  const sceneSet = new Set(DEFAULT_SCENES);
-  if (Array.isArray(candidateState.scenes)) {
-    candidateState.scenes.forEach((scene) => {
-      const normalized = normalizeOptionalText(scene);
-      if (normalized) sceneSet.add(normalized);
-    });
-  }
-
-  const memos = memosSource
-    .map((memo) => normalizeImportedMemo(memo, personIds))
-    .filter(Boolean);
-  memos.forEach((memo) => {
-    if (memo.scene) sceneSet.add(memo.scene);
-  });
-
-  const summariesByPersonId = new Map();
-  summariesSource
-    .map((summary) => normalizeImportedSummary(summary, personIds))
-    .filter(Boolean)
-    .forEach((summary) => {
-      const current = summariesByPersonId.get(summary.personId);
-      if (!current || current.summaryUpdatedAt < summary.summaryUpdatedAt) {
-        summariesByPersonId.set(summary.personId, summary);
-      }
-    });
-
-  return {
-    people: people.sort((a, b) => a.sortOrder - b.sortOrder),
-    memos,
-    summaries: [...summariesByPersonId.values()],
-    scenes: [...sceneSet],
-  };
-}
-
-function formatFilenameDate(value) {
-  return new Intl.DateTimeFormat("sv-SE", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(value);
-}
-
-function normalizeImportedPerson(person, index, usedPersonIds) {
-  if (!person || typeof person !== "object") return null;
-  const name = normalizeRequiredText(person.name);
-  if (!name) return null;
-  const id = uniqueIdFrom(person.id, usedPersonIds);
-  return {
-    id,
-    name,
-    sortOrder: normalizeSortOrder(person.sortOrder, index),
-    createdAt: normalizeIsoString(person.createdAt),
-    updatedAt: normalizeIsoString(person.updatedAt),
-    lastAccessedAt: normalizeNullableIsoString(person.lastAccessedAt),
-  };
-}
-
-function normalizeImportedMemo(memo, personIds) {
-  if (!memo || typeof memo !== "object") return null;
-  const personId = normalizeRequiredText(memo.personId);
-  const rawText = normalizeRequiredText(memo.rawText);
-  if (!personId || !personIds.has(personId) || !rawText) return null;
-  return {
-    id: normalizeRequiredText(memo.id) || crypto.randomUUID(),
-    personId,
-    observedAt: normalizeIsoString(memo.observedAt),
-    createdAt: normalizeIsoString(memo.createdAt ?? memo.observedAt),
-    updatedAt: normalizeIsoString(memo.updatedAt ?? memo.observedAt),
-    rawText,
-    scene: normalizeOptionalText(memo.scene),
-  };
-}
-
-function normalizeImportedSummary(summary, personIds) {
-  if (!summary || typeof summary !== "object") return null;
-  const personId = normalizeRequiredText(summary.personId);
-  if (!personId || !personIds.has(personId)) return null;
-  return {
-    personId,
-    summaryText: typeof summary.summaryText === "string" ? summary.summaryText.trim() : "",
-    summaryUpdatedAt: normalizeIsoString(summary.summaryUpdatedAt),
-  };
-}
-
-function normalizeRequiredText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeOptionalText(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function normalizeSortOrder(value, fallback) {
-  return Number.isFinite(Number(value)) ? Number(value) : fallback;
-}
-
-function normalizeIsoString(value) {
-  if (typeof value === "string" && !Number.isNaN(Date.parse(value))) {
-    return new Date(value).toISOString();
-  }
-  return new Date().toISOString();
-}
-
-function normalizeNullableIsoString(value) {
-  if (value == null || value === "") return null;
-  return normalizeIsoString(value);
-}
-
-function uniqueIdFrom(value, usedIds) {
-  let candidate = normalizeRequiredText(value) || crypto.randomUUID();
-  while (usedIds.has(candidate)) {
-    candidate = crypto.randomUUID();
-  }
-  usedIds.add(candidate);
-  return candidate;
+  return summarizeStoredStateCounts(sourceState);
 }
 
 async function registerServiceWorker() {
@@ -1022,28 +1218,15 @@ async function registerServiceWorker() {
 }
 
 function bindDialogStateEvents() {
-  for (const dialog of Object.values(dialogs)) {
-    dialog.addEventListener("close", syncDialogBodyState);
-    dialog.addEventListener("cancel", syncDialogBodyState);
-  }
+  bindDialogStateEventsHelper({ dialogs, onSync: syncDialogBodyState });
 }
 
 function syncDialogBodyState() {
-  const anyOpen = Object.values(dialogs).some((dialog) => dialog.open);
-  document.body.classList.toggle("dialog-open", anyOpen);
+  syncDialogBodyStateHelper({ dialogs, body: document.body });
 }
 
 function showPreparedDialog(dialog) {
-  resetDialogScroll(dialog);
-  dialog.showModal();
-  syncDialogBodyState();
-}
-
-function resetDialogScroll(dialog) {
-  const content = dialog.querySelector(".sheet-content");
-  if (content) {
-    content.scrollTop = 0;
-  }
+  showPreparedDialogHelper(dialog, { dialogs, body: document.body });
 }
 
 async function refreshAppVersion() {
@@ -1074,9 +1257,7 @@ async function refreshAppVersion() {
 }
 
 function buildRefreshUrl(currentUrl, timestamp) {
-  const url = new URL(currentUrl, window.location.href);
-  url.searchParams.set("update", String(timestamp));
-  return url.toString();
+  return buildRefreshUrlHelper(currentUrl, timestamp, window.location.href);
 }
 
 function openPublicBetaPage() {
@@ -1165,6 +1346,7 @@ function handleSpeechResult(event) {
   const combinedFinal = composeDraftText(speech.baseText, speech.confirmedText);
   speech.liveText = interimText;
   elements.captureDraft.value = composeDraftText(combinedFinal, interimText);
+  scheduleCaptureAutosave();
   renderSpeechPreview();
 }
 
@@ -1187,6 +1369,9 @@ function handleSpeechEnd() {
   const hasAppendedVoice = finalizedDraft !== speech.baseText;
   speech.liveText = "";
   elements.captureDraft.value = finalizedDraft;
+  if (hasAppendedVoice) {
+    persistCaptureMemo();
+  }
   if (speech.lastErrorMessage) {
     renderSpeechStatus(speech.lastErrorMessage, "warning");
   } else if (hasAppendedVoice) {

@@ -29,21 +29,24 @@
         <p class="notice-body">音声入力はキーボードのマイクを使うといちばん入りやすいです。録音ボタンを押す代わりに、メモ欄を開いたらそのまま話せます。</p>
       </section>
 
-      <section class="search-card">
-        <label class="stack">
-          <span class="label">名前で探す</span>
-          <input id="search-input" type="search" placeholder="名前を入力" autocomplete="off" />
-        </label>
-      </section>
-
       <section class="board-card">
         <div class="board-header">
           <div>
             <h2>名前一覧</h2>
-            <p class="subtle">タップで記録。長押しで最近のメモと AI 連携。</p>
+            <p class="subtle">タップですぐ記録。長押しで最近のメモと AI 連携。</p>
           </div>
-          <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
+          <div class="actions wrap">
+            <p id="selection-count-label" class="subtle" hidden></p>
+            <button id="select-mode-button" class="ghost-button" type="button">選択</button>
+            <button id="move-selected-button" class="ghost-button" type="button" hidden>移動</button>
+            <button id="cancel-selection-button" class="ghost-button" type="button" hidden>やめる</button>
+            <button id="add-folder-button" class="ghost-button" type="button">フォルダを作る</button>
+            <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
+          </div>
         </div>
+        <div id="board-summary" class="board-summary" aria-live="polite"></div>
+        <div id="folder-filter-bar" class="filter-bar" aria-label="フォルダ"></div>
+        <div id="board-filter-bar" class="filter-bar" aria-label="一覧の絞り込み"></div>
         <div id="people-grid" class="people-grid"></div>
         <div id="empty-state" class="empty-state" hidden>
           <p>まだ名前がありません。まずは 1 人追加してください。</p>
@@ -77,19 +80,16 @@
           <div>
             <p class="eyebrow">すぐ記録</p>
             <h2 id="capture-person-name">名前</h2>
-            <p id="capture-observed-at" class="subtle"></p>
+            <p id="capture-autosave-status" class="subtle">話すか入力すると自動で保存します。</p>
           </div>
           <button id="capture-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
 
         <section class="voice-card stack">
-          <h3>まずはそのまま話して記録</h3>
-          <p class="subtle">大きいマイクボタンで始められます。うまくいかない時は、そのままキーボードのマイクへ切り替えます。</p>
-          <div class="actions wrap voice-actions">
-            <button id="speech-toggle-button" class="primary-button mic-button" type="button">マイクで話す</button>
-            <button id="focus-draft-button" class="secondary-button" type="button">メモ欄を開く</button>
+          <div class="voice-hero stack">
+            <button id="speech-toggle-button" class="primary-button mic-button mic-button--hero" type="button">録音する</button>
           </div>
-          <p id="speech-status" class="speech-status">ボタン音声入力を試せます。だめな時はキーボードのマイクへ切り替えます。</p>
+          <p id="speech-status" class="speech-status">スタンバイOK。押したらすぐ話せます。</p>
           <p id="speech-preview" class="speech-preview" hidden></p>
         </section>
 
@@ -97,19 +97,6 @@
           <span class="label">メモ</span>
           <textarea id="capture-draft" rows="8" placeholder="ここにそのまま話した内容が入るイメージです"></textarea>
         </label>
-
-        <details class="details-card">
-          <summary>あとで整える項目</summary>
-          <label class="stack top-gap">
-            <span class="label">場面</span>
-            <select id="capture-scene"></select>
-          </label>
-        </details>
-
-        <div class="actions">
-          <button id="capture-cancel-button" class="ghost-button" type="button">キャンセル</button>
-          <button id="capture-save-button" class="primary-button" type="submit">保存する</button>
-        </div>
       </form>
     </dialog>
 
@@ -142,15 +129,50 @@
 
         <section class="stack">
           <div class="section-header">
+            <h3>フォルダ</h3>
+            <button id="preview-create-folder-button" class="ghost-button" type="button">新しく作る</button>
+          </div>
+          <div id="preview-folder-chips" class="filter-bar"></div>
+        </section>
+
+        <section class="stack">
+          <div class="section-header">
             <h3>最近のメモ</h3>
             <p class="subtle">左へスワイプで削除</p>
           </div>
           <div id="preview-memo-list" class="memo-list"></div>
         </section>
 
+        <section class="preview-ai-card stack">
+          <div class="section-header">
+            <h3>AI に送る準備</h3>
+            <p id="preview-ai-summary" class="subtle"></p>
+          </div>
+          <div class="actions wrap">
+            <button id="preview-copy-ai-button" class="primary-button" type="button">AI 用にコピー</button>
+            <button id="preview-ai-button" class="secondary-button" type="button">AI 用に整理する</button>
+          </div>
+        </section>
+
         <div class="actions wrap">
           <button id="preview-quick-record" class="primary-button" type="button">この名前をすぐ記録する</button>
-          <button id="preview-ai-button" class="secondary-button" type="button">AI 用に整理する</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="move-folder-dialog" class="sheet">
+      <div class="sheet-content stack">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">フォルダ移動</p>
+            <h2>どのフォルダへ移しますか</h2>
+          </div>
+          <button id="move-folder-cancel-button" class="ghost-button" type="button">閉じる</button>
+        </header>
+        <p id="move-folder-summary" class="subtle"></p>
+        <div id="move-folder-options" class="filter-bar"></div>
+        <div class="actions wrap">
+          <button id="move-folder-new-button" class="secondary-button" type="button">新しく作る</button>
         </div>
       </div>
     </dialog>
@@ -238,23 +260,10 @@
       </div>
     </dialog>
 
-    <dialog id="confirm-delete-dialog" class="sheet">
-      <form method="dialog" class="sheet-content stack">
-        <header class="sheet-header">
-          <div>
-            <p class="eyebrow">削除確認</p>
-            <h2>このメモを削除しますか</h2>
-          </div>
-        </header>
-        <p class="subtle">元に戻せません。</p>
-        <div class="actions">
-          <button class="ghost-button" value="cancel">キャンセル</button>
-          <button id="confirm-delete-button" class="primary-button danger" value="confirm" type="submit">削除</button>
-        </div>
-      </form>
-    </dialog>
-
-    <div id="toast" class="toast" hidden></div>
+    <div id="toast" class="toast" hidden>
+      <span id="toast-message"></span>
+      <button id="toast-action" class="toast-action" type="button" hidden></button>
+    </div>
     <script type="module" src="./app.js"></script>
   </body>
   </html>

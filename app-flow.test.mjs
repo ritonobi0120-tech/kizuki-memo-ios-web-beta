@@ -73,7 +73,7 @@ test("dialogs are populated before showModal is called", async () => {
         window.__dialogOpenSnapshots.push({
           id: this.id,
           captureName: document.getElementById("capture-person-name")?.textContent ?? "",
-          captureObservedAt: document.getElementById("capture-observed-at")?.textContent ?? "",
+          captureAutosaveStatus: document.getElementById("capture-autosave-status")?.textContent ?? "",
           previewName: document.getElementById("preview-person-name")?.textContent ?? "",
           handoffName: document.getElementById("handoff-person-name")?.textContent ?? "",
           handoffPendingCount: document.getElementById("handoff-pending-count")?.textContent ?? "",
@@ -88,18 +88,11 @@ test("dialogs are populated before showModal is called", async () => {
     await page.getByRole("button", { name: "保存" }).click();
 
     await page.locator("#capture-dialog[open]").waitFor();
-    await page.locator("#capture-draft").fill("開く前から内容が入っているかの確認です。");
-    await page.getByRole("button", { name: "保存する" }).click();
+    await page.locator("#capture-draft").fill("開く前から名前と自動保存表示が入っているかの確認です。");
+    await page.locator("#capture-close-button").click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
 
-    await page.evaluate(async () => {
-      const tile = Array.from(document.querySelectorAll(".person-tile")).find((node) =>
-        node.textContent.includes("回帰テスト"),
-      );
-      tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 80, clientY: 80 }));
-      await new Promise((resolve) => setTimeout(resolve, 520));
-      tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 80, clientY: 80 }));
-    });
-    await page.locator("#preview-dialog[open]").waitFor();
+    await openPreviewViaLongPress(page, "回帰テスト");
     await page.getByRole("button", { name: "AI 用に整理する" }).click();
     await page.locator("#handoff-dialog[open]").waitFor();
 
@@ -109,8 +102,8 @@ test("dialogs are populated before showModal is called", async () => {
     const handoffSnapshot = snapshots.find((item) => item.id === "handoff-dialog");
 
     assert.ok(captureSnapshot, "capture dialog should open");
-    assert.notEqual(captureSnapshot.captureName, "名前");
-    assert.notEqual(captureSnapshot.captureObservedAt, "");
+    assert.equal(captureSnapshot.captureName, "回帰テスト");
+    assert.match(captureSnapshot.captureAutosaveStatus, /自動で保存|自動保存済み/);
 
     assert.ok(previewSnapshot, "preview dialog should open");
     assert.equal(previewSnapshot.previewName, "回帰テスト");
@@ -158,38 +151,81 @@ test("manual refresh uses a cache-busted reload url", async () => {
   });
 });
 
-test("search finds kanji names from hiragana input", async () => {
+test("board folder filters narrow visible names and stay active after auto-save", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("#search-input").fill("たな");
+    await page.locator("#folder-filter-bar").getByRole("button", { name: /すぐ話す/ }).click();
 
     await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
     assert.equal(await page.getByRole("button", { name: /佐藤 あおい/ }).count(), 0);
-  });
-});
+    assert.equal(
+      await page.locator(".person-tile", { hasText: "田中 はる" }).locator(".tile-meta").count(),
+      0,
+    );
 
-test("same-flow save keeps search text and highlights the just-saved person", async () => {
-  await withPage(async (page, baseUrl) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.locator("#search-input").fill("たな");
     await page.getByRole("button", { name: /田中 はる/ }).click();
     await page.locator("#capture-dialog[open]").waitFor();
-    await page.locator("#capture-draft").fill("同じ検索のまま戻したいメモです。");
-    await page.getByRole("button", { name: "保存する" }).click();
+    await page.locator("#capture-draft").fill("フォルダを絞ったまま記録します。");
+    await page.locator("#capture-close-button").click();
     await page.locator("#capture-dialog").waitFor({ state: "hidden" });
 
-    assert.equal(await page.locator("#search-input").inputValue(), "たな");
+    await assert.doesNotReject(() =>
+      page.locator("#folder-filter-bar .filter-pill.is-active", { hasText: "すぐ話す" }).waitFor(),
+    );
+    assert.equal(await page.getByRole("button", { name: /佐藤 あおい/ }).count(), 0);
     await assert.doesNotReject(() =>
       page.locator(".person-tile.is-recently-saved", { hasText: "田中 はる" }).waitFor(),
     );
-    assert.match(
-      await page.locator(".person-tile.is-recently-saved .tile-badge--saved").textContent(),
-      /今の記録/,
-    );
   });
 });
 
-test("speech button shows listening and appended states when browser speech api succeeds", async () => {
+test("creating a folder from the board adds the chip without auto-assigning every visible name", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.prompt = () => "2組";
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await assert.doesNotReject(() => page.getByRole("button", { name: "名前を追加" }).waitFor());
+
+    await page.getByRole("button", { name: "名前を追加" }).click();
+    await page.locator("#person-name-input").fill("フォルダ追加確認");
+    await page.getByRole("button", { name: "保存" }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await page.locator("#capture-close-button").click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /フォルダ追加確認/ }).waitFor());
+    await page.locator("#folder-filter-bar").getByRole("button", { name: /2組/ }).click();
+    assert.equal(await page.getByRole("button", { name: /フォルダ追加確認/ }).count(), 0);
+  });
+});
+
+test("selection mode moves chosen names into an existing folder", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+
+    await page.getByRole("button", { name: "選択" }).click();
+    await assert.doesNotReject(() => page.getByText("0人を選択中").waitFor());
+
+    await page.getByRole("button", { name: /鈴木 けん/ }).click();
+    await assert.doesNotReject(() => page.getByText("1人を選択中").waitFor());
+
+    await page.getByRole("button", { name: "移動" }).click();
+    await page.locator("#move-folder-dialog[open]").waitFor();
+    await page.locator("#move-folder-options").getByRole("button", { name: /あとで整理/ }).click();
+    await page.locator("#move-folder-dialog").waitFor({ state: "hidden" });
+
+    await assert.doesNotReject(() =>
+      page.locator("#folder-filter-bar .filter-pill.is-active", { hasText: "あとで整理" }).waitFor(),
+    );
+    await assert.doesNotReject(() => page.getByRole("button", { name: /鈴木 けん/ }).waitFor());
+    assert.equal(await page.getByText("1人を選択中").count(), 0);
+  });
+});
+
+test("speech button shows ready, recording, and appended states when browser speech api succeeds", async () => {
   await withPage(async (page, baseUrl) => {
     await page.addInitScript(() => {
       window.__fakeSpeech = { instances: [] };
@@ -226,8 +262,9 @@ test("speech button shows listening and appended states when browser speech api 
     await page.getByRole("button", { name: "保存" }).click();
     await page.locator("#capture-dialog[open]").waitFor();
 
+    await expectText(page.locator("#speech-status"), /スタンバイOK/);
     await page.locator("#speech-toggle-button").click();
-    await expectText(page.locator("#speech-status"), /聞き取り中/);
+    await expectText(page.locator("#speech-status"), /録音中/);
     await page.waitForFunction(() => window.__fakeSpeech.instances.length > 0);
 
     await page.evaluate(() => {
@@ -244,8 +281,78 @@ test("speech button shows listening and appended states when browser speech api 
       recognition.emit("end", {});
     });
 
-    await expectText(page.locator("#speech-status"), /追記しました|続きを話せます/);
+    await expectText(page.locator("#speech-status"), /追記しました|もう一度/);
+    await expectText(page.locator("#capture-autosave-status"), /自動保存済み/);
     assert.match(await page.locator("#capture-draft").inputValue(), /音声で入れたメモ/);
+  });
+});
+
+test("capture screen opens standby-ready with only the minimal recording controls", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "名前を追加" }).click();
+    await page.locator("#person-name-input").fill("最小表示");
+    await page.getByRole("button", { name: "保存" }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+
+    assert.equal(await page.locator("#capture-person-name").textContent(), "最小表示");
+    await expectText(page.locator("#speech-status"), /スタンバイOK/);
+    assert.equal(await page.locator("#capture-observed-at").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "保存する" }).count(), 0);
+    assert.equal(await page.getByText("あとで整える項目").count(), 0);
+    assert.equal(await page.getByText("場面").count(), 0);
+  });
+});
+
+test("quick filters hide a newly added no-memo name from pending-only view", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "名前を追加" }).click();
+    await page.locator("#person-name-input").fill("絞り込み確認");
+    await page.getByRole("button", { name: "保存" }).click();
+    await page.locator("#capture-dialog[open]").waitFor();
+    await page.locator("#capture-close-button").click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+
+    await page.getByRole("button", { name: "未整理あり" }).click();
+
+    assert.equal(await page.getByRole("button", { name: /絞り込み確認/ }).count(), 0);
+    await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
+  });
+});
+
+test("preview keeps the AI copy button visible for the selected name", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await openPreviewViaLongPress(page, "田中 はる");
+
+    await assert.doesNotReject(() => page.locator("#preview-copy-ai-button").waitFor());
+    assert.match(await page.locator("#preview-copy-ai-button").textContent(), /AI 用にコピー（\d+件）/);
+  });
+});
+
+test("swiping a memo deletes it immediately and undo restores it", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await openPreviewViaLongPress(page, "田中 はる");
+
+    const firstMemoText = await page.locator(".memo-card .memo-text").first().textContent();
+    const firstMemoCard = page.locator(".memo-card").first();
+    const box = await firstMemoCard.boundingBox();
+    assert.ok(box, "memo card should be visible");
+
+    await page.mouse.move(box.x + box.width - 20, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 16, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+
+    await assert.doesNotReject(() => page.locator("#toast-action", { hasText: "もとに戻す" }).waitFor());
+    assert.equal(await page.locator(".memo-card .memo-text", { hasText: firstMemoText.trim() }).count(), 0);
+
+    await page.locator("#toast-action").click();
+    await assert.doesNotReject(() =>
+      page.locator(".memo-card .memo-text", { hasText: firstMemoText.trim() }).waitFor(),
+    );
   });
 });
 
@@ -273,16 +380,12 @@ test("json export triggers a downloadable backup file", async () => {
   });
 });
 
-async function expectText(locator, pattern) {
-  await assert.doesNotReject(() => locator.waitFor());
-  assert.match((await locator.textContent()) ?? "", pattern);
-}
-
 test("install guidance collapses after roster grows", async () => {
   await withPage(async (page, baseUrl) => {
     await page.addInitScript(() => {
       window.confirm = () => true;
     });
+
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     assert.equal(await page.locator("#install-card").evaluate((node) => node.hidden), true);
 
@@ -305,26 +408,23 @@ test("install guidance collapses after roster grows", async () => {
   });
 });
 
-test("capture close confirms before discarding unsaved draft", async () => {
+test("capture close auto-saves the draft and does not require a discard confirmation", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await page.getByRole("button", { name: "名前を追加" }).click();
-    await page.locator("#person-name-input").fill("破棄確認");
+    await page.locator("#person-name-input").fill("自動保存確認");
     await page.getByRole("button", { name: "保存" }).click();
 
     await page.locator("#capture-dialog[open]").waitFor();
-    await page.locator("#capture-draft").fill("保存前に閉じたら確認が必要です。");
-
+    await page.locator("#capture-draft").fill("閉じても残ってほしいメモです。");
     await page.getByRole("button", { name: "閉じる" }).click();
-    await page.locator("#discard-capture-dialog[open]").waitFor();
-    await page.locator("#discard-capture-cancel-button").click();
-    await page.locator("#capture-dialog[open]").waitFor();
-    await assert.doesNotReject(() => page.locator("#capture-draft").waitFor());
-
-    await page.getByRole("button", { name: "閉じる" }).click();
-    await page.locator("#discard-capture-dialog[open]").waitFor();
-    await page.locator("#discard-capture-confirm-button").click();
     await page.locator("#capture-dialog").waitFor({ state: "hidden" });
+
+    assert.equal(await page.locator("#discard-capture-dialog[open]").count(), 0);
+    await openPreviewViaLongPress(page, "自動保存確認");
+    await assert.doesNotReject(() =>
+      page.locator(".memo-card .memo-text", { hasText: "閉じても残ってほしいメモです。" }).waitFor(),
+    );
   });
 });
 
@@ -334,17 +434,10 @@ test("handoff close confirms before discarding pasted summary", async () => {
     await page.getByRole("button", { name: /田中 はる/ }).click();
     await page.locator("#capture-dialog[open]").waitFor();
     await page.locator("#capture-draft").fill("AI 整理前のメモです。");
-    await page.getByRole("button", { name: "保存する" }).click();
+    await page.locator("#capture-close-button").click();
+    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
 
-    await page.evaluate(async () => {
-      const tile = Array.from(document.querySelectorAll(".person-tile")).find((node) =>
-        node.textContent.includes("田中 はる"),
-      );
-      tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 80, clientY: 80 }));
-      await new Promise((resolve) => setTimeout(resolve, 520));
-      tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 80, clientY: 80 }));
-    });
-    await page.locator("#preview-dialog[open]").waitFor();
+    await openPreviewViaLongPress(page, "田中 はる");
     await page.getByRole("button", { name: "AI 用に整理する" }).click();
     await page.locator("#handoff-dialog[open]").waitFor();
     await page.locator("#handoff-import-text").fill("貼り戻し文を保存前に閉じます。");
@@ -353,7 +446,6 @@ test("handoff close confirms before discarding pasted summary", async () => {
     await page.locator("#discard-handoff-dialog[open]").waitFor();
     await page.locator("#discard-handoff-cancel-button").click();
     await page.locator("#handoff-dialog[open]").waitFor();
-    await assert.doesNotReject(() => page.locator("#handoff-import-text").waitFor());
     assert.equal(await page.locator("#handoff-import-text").inputValue(), "貼り戻し文を保存前に閉じます。");
 
     await page.locator("#handoff-close-button").click();
@@ -380,12 +472,24 @@ test("json import confirms before replacing and accepts versioned backup", async
     const replacementState = {
       schemaVersion: 1,
       exportedAt: "2026-04-15T00:00:00.000Z",
-      recordCounts: { people: 1, memos: 1, summaries: 1, scenes: 2 },
+      recordCounts: { people: 1, folders: 1, memos: 1, summaries: 1, scenes: 2 },
       state: {
+        folders: [
+          {
+            id: "folder-imported",
+            name: "読み込みフォルダ",
+            icon: "📁",
+            colorKey: "sand",
+            sortOrder: 0,
+            createdAt: "2026-04-15T00:00:00.000Z",
+            updatedAt: "2026-04-15T00:00:00.000Z",
+          },
+        ],
         people: [
           {
             id: "person-imported",
             name: "インポート確認",
+            folderId: "folder-imported",
             sortOrder: 0,
             createdAt: "2026-04-15T00:00:00.000Z",
             updatedAt: "2026-04-15T00:00:00.000Z",
@@ -422,8 +526,9 @@ test("json import confirms before replacing and accepts versioned backup", async
 
     const firstConfirmMessages = await page.evaluate(() => window.__confirmMessages);
     assert.equal(firstConfirmMessages.length, 1);
-    assert.match(firstConfirmMessages[0], /1 人/);
-    assert.match(firstConfirmMessages[0], /1 件/);
+    assert.match(firstConfirmMessages[0], /名前 1 人/);
+    assert.match(firstConfirmMessages[0], /フォルダ 1 個/);
+    assert.match(firstConfirmMessages[0], /メモ 1 件/);
 
     await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
     assert.equal(await page.getByRole("button", { name: /インポート確認/ }).count(), 0);
@@ -443,5 +548,25 @@ test("json import confirms before replacing and accepts versioned backup", async
 
     await assert.doesNotReject(() => page.getByRole("button", { name: /インポート確認/ }).waitFor());
     assert.equal(await page.getByRole("button", { name: /田中 はる/ }).count(), 0);
+    await assert.doesNotReject(() =>
+      page.locator(".person-tile", { hasText: "インポート確認" }).locator(".tile-meta", { hasText: "読み込みフォルダ" }).waitFor(),
+    );
   });
 });
+
+async function openPreviewViaLongPress(page, name) {
+  await page.evaluate(async (targetName) => {
+    const tile = Array.from(document.querySelectorAll(".person-tile")).find((node) =>
+      node.textContent.includes(targetName),
+    );
+    tile.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 80, clientY: 80 }));
+    await new Promise((resolve) => setTimeout(resolve, 520));
+    tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 80, clientY: 80 }));
+  }, name);
+  await page.locator("#preview-dialog[open]").waitFor();
+}
+
+async function expectText(locator, pattern) {
+  await assert.doesNotReject(() => locator.waitFor());
+  assert.match((await locator.textContent()) ?? "", pattern);
+}

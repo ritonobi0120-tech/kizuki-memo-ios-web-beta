@@ -1,0 +1,21 @@
+✔ dialogs are populated before showModal is called (2479.7276ms)
+✔ settings includes update fallback and public page button (1399.5095ms)
+✔ manual refresh uses a cache-busted reload url (1585.9134ms)
+✔ search finds kanji names from hiragana input (1121.798ms)
+✔ same-flow save keeps search text and highlights the just-saved person (1607.5012ms)
+✔ speech button shows listening and appended states when browser speech api succeeds (1656.0334ms)
+✔ capture screen keeps the voice area minimal until recording starts (1328.7858ms)
+✔ swiping a memo deletes it immediately and undo restores it (2453.298ms)
+✔ json export triggers a downloadable backup file (2098.5868ms)
+✔ install guidance collapses after roster grows (2057.0446ms)
+✔ capture close confirms before discarding unsaved draft (1999.195ms)
+✔ handoff close confirms before discarding pasted summary (2370.4779ms)
+✔ json import confirms before replacing and accepts versioned backup (1326.9427ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24885.7292
