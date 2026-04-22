@@ -108,6 +108,23 @@ export function persistState({ storage, storageKey, state }) {
   storage.setItem(storageKey, JSON.stringify(normalizeImportedState(state)));
 }
 
+export function loadAuxJson({ storage, storageKey }) {
+  try {
+    const raw = storage.getItem(storageKey);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistAuxJson({ storage, storageKey, value }) {
+  if (value == null) {
+    storage.removeItem(storageKey);
+    return;
+  }
+  storage.setItem(storageKey, JSON.stringify(value));
+}
+
 export function normalizeImportedState(candidateState) {
   if (!candidateState || typeof candidateState !== "object") {
     throw new Error("invalid");

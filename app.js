@@ -7,8 +7,10 @@ import {
   BOARD_FILTERS,
   applyBoardFilter,
   buildBoardSummary,
+  buildBulkAiExport,
   buildHandoffBundle as buildUiHandoffBundle,
   nextMemosForHandoff,
+  parseBulkAiResponse,
 } from "./ui-logic.mjs";
 import {
   DEFAULT_FOLDER_PRESETS,
@@ -16,8 +18,10 @@ import {
   buildStateExport,
   createDemoState as createDemoStorageState,
   emptyState as buildEmptyState,
+  loadAuxJson,
   loadState as loadStoredState,
   normalizeImportedState,
+  persistAuxJson,
   persistState as persistStoredState,
   summarizeStateCounts as summarizeStoredStateCounts,
 } from "./storage-logic.mjs";
@@ -29,10 +33,12 @@ import {
   showPreparedDialog as showPreparedDialogHelper,
   syncDialogBodyState as syncDialogBodyStateHelper,
 } from "./dom-helpers.mjs";
+import { matchesPersonSearch } from "./name-search.mjs";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
+const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-21 選択移動と重複整理";
+const WEB_BETA_BUILD_LABEL = "2026-04-22 フォルダ管理と検索";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -53,14 +59,21 @@ const dialogs = {
   preview: document.getElementById("preview-dialog"),
   moveFolder: document.getElementById("move-folder-dialog"),
   handoff: document.getElementById("handoff-dialog"),
+  bulkAi: document.getElementById("bulk-ai-dialog"),
   discardHandoff: document.getElementById("discard-handoff-dialog"),
   settings: document.getElementById("settings-dialog"),
 };
 
 const elements = {
   installCard: document.getElementById("install-card"),
+  boardSearchInput: document.getElementById("board-search-input"),
   boardSummary: document.getElementById("board-summary"),
   folderFilterBar: document.getElementById("folder-filter-bar"),
+  folderManageCard: document.getElementById("folder-manage-card"),
+  folderManageTitle: document.getElementById("folder-manage-title"),
+  folderManageCaption: document.getElementById("folder-manage-caption"),
+  changeFolderColorButton: document.getElementById("change-folder-color-button"),
+  deleteFolderButton: document.getElementById("delete-folder-button"),
   boardFilterBar: document.getElementById("board-filter-bar"),
   peopleGrid: document.getElementById("people-grid"),
   emptyState: document.getElementById("empty-state"),
@@ -70,6 +83,7 @@ const elements = {
   cancelSelectionButton: document.getElementById("cancel-selection-button"),
   addPersonButton: document.getElementById("add-person-button"),
   addFolderButton: document.getElementById("add-folder-button"),
+  openBulkAiButton: document.getElementById("open-bulk-ai-button"),
   openSettingsButton: document.getElementById("open-settings-button"),
   personDialogTitle: document.getElementById("person-dialog-title"),
   personNameInput: document.getElementById("person-name-input"),
@@ -103,6 +117,16 @@ const elements = {
   handoffImportText: document.getElementById("handoff-import-text"),
   handoffCloseButton: document.getElementById("handoff-close-button"),
   handoffCancelButton: document.getElementById("handoff-cancel-button"),
+  bulkAiSummary: document.getElementById("bulk-ai-summary"),
+  bulkAiCloseButton: document.getElementById("bulk-ai-close-button"),
+  bulkAiCopyButton: document.getElementById("bulk-ai-copy-button"),
+  bulkAiActiveWarning: document.getElementById("bulk-ai-active-warning"),
+  bulkAiPeople: document.getElementById("bulk-ai-people"),
+  bulkAiResponseText: document.getElementById("bulk-ai-response-text"),
+  bulkAiReviewButton: document.getElementById("bulk-ai-review-button"),
+  bulkAiApplyButton: document.getElementById("bulk-ai-apply-button"),
+  bulkAiPreviewMeta: document.getElementById("bulk-ai-preview-meta"),
+  bulkAiPreviewList: document.getElementById("bulk-ai-preview-list"),
   discardHandoffCancelButton: document.getElementById("discard-handoff-cancel-button"),
   discardHandoffConfirmButton: document.getElementById("discard-handoff-confirm-button"),
   settingsCloseButton: document.getElementById("settings-close-button"),
@@ -119,7 +143,11 @@ const elements = {
 };
 
 let state = loadState();
+let bulkAiSession = loadBulkAiSession();
+let bulkAiPreview = null;
+let bulkAiParseError = "";
 let ui = {
+  searchQuery: "",
   boardFilter: "all",
   folderFilter: "all",
   editingPersonId: null,
@@ -166,6 +194,11 @@ function boot() {
 }
 
 function bindEvents() {
+  elements.boardSearchInput.addEventListener("input", () => {
+    ui.searchQuery = elements.boardSearchInput.value;
+    trimSelectionToVisible();
+    renderPeople();
+  });
   elements.folderFilterBar.addEventListener("click", (event) => {
     const button = event.target.closest("[data-folder-filter]");
     if (!button) return;
@@ -200,6 +233,15 @@ function bindEvents() {
   });
   elements.addFolderButton.addEventListener("click", () => {
     createFolderFromPrompt();
+  });
+  elements.changeFolderColorButton.addEventListener("click", () => {
+    changeSelectedFolderColor();
+  });
+  elements.deleteFolderButton.addEventListener("click", () => {
+    deleteSelectedFolder();
+  });
+  elements.openBulkAiButton.addEventListener("click", () => {
+    openBulkAiDialog();
   });
 
   elements.openSettingsButton.addEventListener("click", () => {
@@ -280,6 +322,10 @@ function bindEvents() {
   });
   elements.handoffCloseButton.addEventListener("click", requestHandoffClose);
   elements.handoffCancelButton.addEventListener("click", requestHandoffClose);
+  elements.bulkAiCloseButton.addEventListener("click", () => dialogs.bulkAi.close());
+  elements.bulkAiCopyButton.addEventListener("click", copyBulkAiBundle);
+  elements.bulkAiReviewButton.addEventListener("click", reviewBulkAiResponse);
+  elements.bulkAiApplyButton.addEventListener("click", applyBulkAiPreview);
 
   elements.copyHandoffButton.addEventListener("click", async () => {
     if (!ui.handoffPersonId) return;
@@ -297,14 +343,22 @@ function bindEvents() {
   elements.importJsonInput.addEventListener("change", importStateFromJson);
   elements.seedDemoButton.addEventListener("click", () => {
     state = createDemoState();
+    bulkAiSession = null;
+    bulkAiPreview = null;
+    bulkAiParseError = "";
     persistState();
+    persistBulkAiSession();
     render();
     toast("デモデータを入れました");
   });
   elements.resetDataButton.addEventListener("click", () => {
     if (!window.confirm("この beta の保存データを消します。よろしいですか。")) return;
     state = emptyState();
+    bulkAiSession = null;
+    bulkAiPreview = null;
+    bulkAiParseError = "";
     persistState();
+    persistBulkAiSession();
     render();
     dialogs.settings.close();
     toast("保存データを消しました");
@@ -332,6 +386,7 @@ function render() {
   renderCapture();
   renderPreview();
   renderHandoff();
+  renderBulkAi();
   renderSpeechStatus();
 }
 
@@ -354,10 +409,12 @@ function renderSelectionActions() {
   elements.moveSelectedButton.disabled = selectedCount === 0;
   elements.addPersonButton.hidden = ui.selectionMode;
   elements.addFolderButton.hidden = ui.selectionMode;
+  elements.openBulkAiButton.hidden = ui.selectionMode;
 }
 
 function renderPeople() {
   const visiblePeople = currentVisiblePeople();
+  elements.boardSearchInput.value = ui.searchQuery;
 
   renderBoardSummary(
     buildBoardSummary({
@@ -367,12 +424,15 @@ function renderPeople() {
     }),
   );
   renderFolderFilters();
+  renderFolderManager();
   renderBoardFilters();
   elements.peopleGrid.innerHTML = "";
   elements.emptyState.hidden = visiblePeople.length > 0;
   elements.emptyState.innerHTML =
     state.people.length === 0
       ? "<p>まだ名前がありません。まずは 1 人追加してください。</p>"
+      : ui.searchQuery.trim()
+        ? "<p>検索に合う名前が見つかりません。ひらがなや別の呼び方でも試してください。</p>"
       : "<p>このフォルダにはまだ名前がありません。フォルダを戻すか、別の名前を入れてください。</p>";
 
   const showFolderMeta = ui.folderFilter === "all";
@@ -408,6 +468,15 @@ function renderPeople() {
     }
     elements.peopleGrid.appendChild(tile);
   }
+}
+
+function renderFolderManager() {
+  const folder = selectedFolder();
+  elements.folderManageCard.hidden = !folder;
+  if (!folder) return;
+  const memberCount = state.people.filter((person) => person.folderId === folder.id).length;
+  elements.folderManageTitle.innerHTML = `${folderIconMarkup(folder)}${escapeHtml(folder.name)}`;
+  elements.folderManageCaption.textContent = `${memberCount}人がこのフォルダに入っています`;
 }
 
 function renderCapture() {
@@ -520,6 +589,69 @@ function renderHandoff() {
   elements.handoffCopyBlock.textContent = bundle.copyText;
 }
 
+function renderBulkAi() {
+  const bundle = currentBulkAiBundle();
+  elements.bulkAiSummary.textContent = bundle.pendingPeople.length
+    ? `${bundle.pendingPeople.length}人 / 未整理メモ ${bundle.payload.memoCount}件`
+    : "未整理メモはありません。";
+  elements.bulkAiPeople.innerHTML = bundle.pendingPeople.length
+    ? bundle.pendingPeople
+        .map(
+          (person) =>
+            `<span class="filter-pill">${escapeHtml(person.personName)} (${person.pendingMemos.length}件)</span>`,
+        )
+        .join("")
+    : `<span class="subtle">未整理メモはありません。</span>`;
+  elements.bulkAiActiveWarning.hidden = !bulkAiSession;
+  elements.bulkAiActiveWarning.textContent = bulkAiSession
+    ? `未反映の一括整理があります。${bulkAiSession.people.length}人 / ${bulkAiSession.people.reduce((sum, person) => sum + person.includedMemoIds.length, 0)}件`
+    : "";
+  elements.bulkAiPreviewMeta.textContent = bulkAiParseError
+    ? bulkAiParseErrorToText(bulkAiParseError)
+    : bulkAiPreview
+      ? `反映OK ${bulkAiPreview.successEntries.length}人 / 未反映 ${bulkAiPreview.failureEntries.length}人`
+      : "返答を貼って「返答を確認する」を押すと、ここに反映予定が出ます。";
+  elements.bulkAiPreviewList.innerHTML = bulkAiParseError
+    ? `<p class=\"subtle\">${escapeHtml(bulkAiParseErrorToText(bulkAiParseError))}</p>`
+    : renderBulkAiPreviewRows();
+  elements.bulkAiApplyButton.disabled = !bulkAiPreview || bulkAiPreview.successEntries.length === 0;
+}
+
+function renderBulkAiPreviewRows() {
+  if (!bulkAiPreview) {
+    return `<p class="subtle">まだ確認前です。</p>`;
+  }
+  const successRows = bulkAiPreview.successEntries.length
+    ? `
+      <div class="stack">
+        <p class="label">反映する名前</p>
+        ${bulkAiPreview.successEntries
+          .map(
+            (entry) =>
+              `<div class="bulk-preview-row bulk-preview-row--success"><strong>反映OK</strong><span>${escapeHtml(entry.personName)}</span></div>`,
+          )
+          .join("")}
+      </div>
+    `
+    : "";
+  const failureRows = bulkAiPreview.failureEntries.length
+    ? `
+      <div class="stack">
+        <p class="label">確認が必要な名前</p>
+        ${bulkAiPreview.failureEntries
+          .map((entry) => {
+            const label = entry.personName || entry.personToken || "不明";
+            return `<div class="bulk-preview-row bulk-preview-row--failure"><strong>未反映</strong><span>${escapeHtml(
+              `${label} / ${bulkAiFailureReasonToText(entry.reason)}`,
+            )}</span></div>`;
+          })
+          .join("")}
+      </div>
+    `
+    : "";
+  return [successRows, failureRows].filter(Boolean).join("") || `<p class="subtle">反映できる名前がありません。</p>`;
+}
+
 function openPersonDialog(personId = null) {
   ui.editingPersonId = personId;
   const person = personId ? findPerson(personId) : null;
@@ -560,6 +692,14 @@ function openHandoff(personId) {
   renderHandoff();
   showPreparedDialog(dialogs.handoff);
   markOpened(personId);
+}
+
+function openBulkAiDialog() {
+  bulkAiPreview = null;
+  bulkAiParseError = "";
+  elements.bulkAiResponseText.value = "";
+  renderBulkAi();
+  showPreparedDialog(dialogs.bulkAi);
 }
 
 function savePerson(name) {
@@ -845,6 +985,11 @@ function renderFolderFilters() {
     .join("");
 }
 
+function selectedFolder() {
+  if (ui.folderFilter === "all" || ui.folderFilter === "unassigned") return null;
+  return folderFor(ui.folderFilter);
+}
+
 function createFolderFromPrompt(assignPersonIdOrIds = null, { skipConfirmAssign = false } = {}) {
   const name = window.prompt("フォルダ名を入れてください");
   if (!name || !name.trim()) return;
@@ -880,6 +1025,39 @@ function createFolderFromPrompt(assignPersonIdOrIds = null, { skipConfirmAssign 
   clearSelectionMode();
   render();
   toast("フォルダを作りました");
+}
+
+function changeSelectedFolderColor() {
+  const folder = selectedFolder();
+  if (!folder) return;
+  const currentIndex = Math.max(
+    0,
+    FOLDER_COLOR_CHOICES.findIndex((item) => item.colorKey === folder.colorKey),
+  );
+  const choice = pickFolderColorChoice(currentIndex);
+  if (!choice) return;
+  folder.colorKey = choice.colorKey;
+  folder.updatedAt = new Date().toISOString();
+  persistState();
+  render();
+  toast("フォルダの色を変えました");
+}
+
+function deleteSelectedFolder() {
+  const folder = selectedFolder();
+  if (!folder) return;
+  const confirmed = window.confirm(`「${folder.name}」を削除すると、中の名前は未分類へ戻ります。よろしいですか？`);
+  if (!confirmed) return;
+  assignPeopleToFolder(
+    state.people.filter((person) => person.folderId === folder.id).map((person) => person.id),
+    null,
+    { skipRender: true },
+  );
+  state.folders = state.folders.filter((item) => item.id !== folder.id);
+  ui.folderFilter = "all";
+  persistState();
+  render();
+  toast("フォルダを削除しました");
 }
 
 function openMoveFolderDialog() {
@@ -987,6 +1165,92 @@ async function copyHandoffBundleForPerson(personId) {
   }
 }
 
+function currentBulkAiBundle() {
+  return buildBulkAiExport({
+    people: state.people.slice().sort((a, b) => a.sortOrder - b.sortOrder),
+    memos: state.memos,
+    summaries: state.summaries,
+    batchId: bulkAiSession?.batchId || crypto.randomUUID(),
+    exportedAt: new Date().toISOString(),
+  });
+}
+
+async function copyBulkAiBundle() {
+  const bundle = currentBulkAiBundle();
+  if (bundle.pendingPeople.length === 0) {
+    toast("未整理メモはありません。");
+    return;
+  }
+  if (bulkAiSession) {
+    const shouldReplace = window.confirm("未反映の一括整理があります。置き換えて新しくコピーしますか。");
+    if (!shouldReplace) return;
+  }
+  bulkAiSession = bundle.session;
+  bulkAiPreview = null;
+  bulkAiParseError = "";
+  persistBulkAiSession();
+  renderBulkAi();
+  try {
+    await writeTextToClipboard(bundle.copyText);
+    toast("AI 用データをコピーしました");
+  } catch {
+    toast("コピーできませんでした。長押しでコピーしてください。");
+  }
+}
+
+function reviewBulkAiResponse() {
+  if (!bulkAiSession) {
+    bulkAiParseError = "batch_mismatch";
+    bulkAiPreview = null;
+    renderBulkAi();
+    return;
+  }
+  const outcome = parseBulkAiResponse({
+    responseText: elements.bulkAiResponseText.value,
+    session: bulkAiSession,
+  });
+  bulkAiParseError = outcome.parseError || "";
+  bulkAiPreview = outcome.preview;
+  renderBulkAi();
+}
+
+function applyBulkAiPreview() {
+  if (!bulkAiPreview || bulkAiPreview.successEntries.length === 0) return;
+  const now = new Date().toISOString();
+  bulkAiPreview.successEntries.forEach((entry) => {
+    const existing = state.summaries.find((summary) => summary.personId === entry.personId);
+    if (existing) {
+      existing.summaryText = entry.summaryText;
+      existing.summaryUpdatedAt = now;
+    } else {
+      state.summaries.push({
+        personId: entry.personId,
+        summaryText: entry.summaryText,
+        summaryUpdatedAt: now,
+      });
+    }
+    state.memos = state.memos.filter((memo) => !entry.includedMemoIds.includes(memo.id));
+  });
+
+  const successfulIds = new Set(bulkAiPreview.successEntries.map((entry) => entry.personId));
+  if (bulkAiSession) {
+    bulkAiSession = {
+      ...bulkAiSession,
+      people: bulkAiSession.people.filter((person) => !successfulIds.has(person.personId)),
+    };
+    if (bulkAiSession.people.length === 0) {
+      bulkAiSession = null;
+    }
+  }
+  bulkAiPreview = null;
+  bulkAiParseError = "";
+  elements.bulkAiResponseText.value = "";
+  persistState();
+  persistBulkAiSession();
+  render();
+  toast("一括で整理ノートへ反映しました");
+}
+
 function pendingMemoCount(personId) {
   const summary = summaryFor(personId);
   return nextMemosForHandoff({
@@ -1015,7 +1279,14 @@ function folderFor(folderId) {
 }
 
 function currentVisiblePeople() {
-  const folderScopedPeople = applyFolderFilter(state.people).sort((a, b) => a.sortOrder - b.sortOrder);
+  const folderScopedPeople = applyFolderFilter(state.people)
+    .filter((person) =>
+      matchesPersonSearch({
+        query: ui.searchQuery,
+        name: person.name,
+      }),
+    )
+    .sort((a, b) => a.sortOrder - b.sortOrder);
   return applyBoardFilter({
     people: folderScopedPeople,
     filter: ui.boardFilter,
@@ -1028,7 +1299,17 @@ function folderColorValue(colorKey) {
 }
 
 function folderIconMarkup(folder) {
-  return `<span class="folder-chip-icon" style="color: ${folderColorValue(folder.colorKey)}">${escapeHtml(folder.icon || "📁")}</span>`;
+  const color = folderColorValue(folder.colorKey);
+  return `
+    <span class="folder-chip-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path
+          d="M3 6.75C3 5.7835 3.7835 5 4.75 5H10.1C10.5878 5 11.0556 5.19819 11.3859 5.54922L12.525 6.75H19.25C20.2165 6.75 21 7.5335 21 8.5V17.25C21 18.2165 20.2165 19 19.25 19H4.75C3.7835 19 3 18.2165 3 17.25V6.75Z"
+          fill="${color}"
+        />
+      </svg>
+    </span>
+  `;
 }
 
 function pickFolderColorChoice(defaultIndex = 0) {
@@ -1114,7 +1395,11 @@ async function importStateFromJson(event) {
       return;
     }
     state = importedState;
+    bulkAiSession = null;
+    bulkAiPreview = null;
+    bulkAiParseError = "";
     persistState();
+    persistBulkAiSession();
     render();
     dialogs.settings.close();
     toast(`JSON を読み込みました（${counts.people}人 / メモ ${counts.memos}件）`);
@@ -1146,11 +1431,26 @@ function loadState() {
   });
 }
 
+function loadBulkAiSession() {
+  return loadAuxJson({
+    storage: window.localStorage,
+    storageKey: BULK_AI_SESSION_KEY,
+  });
+}
+
 function persistState() {
   persistStoredState({
     storage: window.localStorage,
     storageKey: STORAGE_KEY,
     state,
+  });
+}
+
+function persistBulkAiSession() {
+  persistAuxJson({
+    storage: window.localStorage,
+    storageKey: BULK_AI_SESSION_KEY,
+    value: bulkAiSession,
   });
 }
 
@@ -1206,6 +1506,36 @@ function escapeHtml(value) {
 
 function summarizeStateCounts(sourceState) {
   return summarizeStoredStateCounts(sourceState);
+}
+
+function bulkAiParseErrorToText(reason) {
+  switch (reason) {
+    case "invalid_json":
+      return "返答の JSON を読み取れませんでした。";
+    case "invalid_schema":
+      return "返答の形式が違います。";
+    case "batch_mismatch":
+      return "今のコピー内容と返答の batch が一致しません。";
+    case "empty_results":
+      return "返答に整理結果がありません。";
+    default:
+      return "返答を確認できませんでした。";
+  }
+}
+
+function bulkAiFailureReasonToText(reason) {
+  switch (reason) {
+    case "missing_result":
+      return "返答がありません";
+    case "duplicate_token":
+      return "返答が重複しています";
+    case "unknown_token":
+      return "今の一括整理に含まれていません";
+    case "empty_summary":
+      return "整理文が空です";
+    default:
+      return "確認が必要です";
+  }
 }
 
 async function registerServiceWorker() {

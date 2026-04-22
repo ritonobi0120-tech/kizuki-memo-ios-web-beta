@@ -179,6 +179,16 @@ test("board folder filters narrow visible names and stay active after auto-save"
   });
 });
 
+test("top search can find kanji names from hiragana input", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByPlaceholder("名前・呼び名・かなで検索").fill("たな");
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /田中 はる/ }).waitFor());
+    assert.equal(await page.getByRole("button", { name: /佐藤 あおい/ }).count(), 0);
+  });
+});
+
 test("creating a folder from the board adds the chip without auto-assigning every visible name", async () => {
   await withPage(async (page, baseUrl) => {
     await page.addInitScript(() => {
@@ -202,6 +212,26 @@ test("creating a folder from the board adds the chip without auto-assigning ever
   });
 });
 
+test("selected folder can be deleted from the board", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.prompt = () => "消す用";
+      window.confirm = () => true;
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await page.locator("#folder-filter-bar").getByRole("button", { name: /消す用/ }).click();
+
+    await page.getByRole("button", { name: "このフォルダを削除" }).click();
+
+    await assert.doesNotReject(() =>
+      page.locator("#folder-filter-bar .filter-pill.is-active", { hasText: "すべて" }).waitFor(),
+    );
+    assert.equal(await page.locator("#folder-filter-bar").getByRole("button", { name: /消す用/ }).count(), 0);
+  });
+});
+
 test("selection mode moves chosen names into an existing folder", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -222,6 +252,53 @@ test("selection mode moves chosen names into an existing folder", async () => {
     );
     await assert.doesNotReject(() => page.getByRole("button", { name: /鈴木 けん/ }).waitFor());
     assert.equal(await page.getByText("1人を選択中").count(), 0);
+  });
+});
+
+test("bulk ai handoff copies all pending people and applies summaries back", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.__copiedText = "";
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: async (text) => {
+            window.__copiedText = text;
+          },
+        },
+      });
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "一括AI整理" }).click();
+    await page.locator("#bulk-ai-dialog[open]").waitFor();
+
+    await page.getByRole("button", { name: "AI用にまとめてコピー" }).click();
+    const copiedText = await page.evaluate(() => window.__copiedText);
+    assert.match(copiedText, /kizuki-batch-export-v1/);
+
+    const responseText = await page.evaluate(() => {
+      const payload = JSON.parse(window.__copiedText.replace(/^```json\n/, "").replace(/\n```$/, ""));
+      return JSON.stringify(
+        {
+          schema: "kizuki-batch-response-v1",
+          batchId: payload.batchId,
+          results: payload.people.map((person, index) => ({
+            personToken: person.personToken,
+            summaryText: `整理ノート ${index + 1}`,
+          })),
+        },
+        null,
+        2,
+      );
+    });
+
+    await page.locator("#bulk-ai-response-text").fill(responseText);
+    await page.getByRole("button", { name: "返答を確認する" }).click();
+    await assert.doesNotReject(() => page.getByText("反映する名前").waitFor());
+
+    await page.getByRole("button", { name: "一括反映" }).click();
+    await assert.doesNotReject(() => page.locator("#bulk-ai-summary", { hasText: "未整理メモはありません。" }).waitFor());
   });
 });
 

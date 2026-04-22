@@ -41,11 +41,35 @@
             <button id="move-selected-button" class="ghost-button" type="button" hidden>移動</button>
             <button id="cancel-selection-button" class="ghost-button" type="button" hidden>やめる</button>
             <button id="add-folder-button" class="ghost-button" type="button">フォルダを作る</button>
+            <button id="open-bulk-ai-button" class="ghost-button" type="button">一括AI整理</button>
             <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
           </div>
         </div>
+        <label class="stack">
+          <span class="label">検索</span>
+          <input
+            id="board-search-input"
+            type="search"
+            inputmode="search"
+            autocomplete="off"
+            placeholder="名前・呼び名・かなで検索"
+            aria-label="名前・呼び名・かなで検索"
+          />
+        </label>
         <div id="board-summary" class="board-summary" aria-live="polite"></div>
         <div id="folder-filter-bar" class="filter-bar" aria-label="フォルダ"></div>
+        <section id="folder-manage-card" class="details-card stack" hidden>
+          <div class="section-header">
+            <div>
+              <h3 id="folder-manage-title">フォルダ</h3>
+              <p id="folder-manage-caption" class="subtle"></p>
+            </div>
+            <div class="actions wrap">
+              <button id="change-folder-color-button" class="secondary-button" type="button">色を変える</button>
+              <button id="delete-folder-button" class="ghost-button danger" type="button">このフォルダを削除</button>
+            </div>
+          </div>
+        </section>
         <div id="board-filter-bar" class="filter-bar" aria-label="一覧の絞り込み"></div>
         <div id="people-grid" class="people-grid"></div>
         <div id="empty-state" class="empty-state" hidden>
@@ -206,6 +230,45 @@
           </div>
         </section>
       </form>
+    </dialog>
+
+    <dialog id="bulk-ai-dialog" class="sheet">
+      <div class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">一括AI整理</p>
+            <h2>未整理メモをまとめて整える</h2>
+            <p id="bulk-ai-summary" class="subtle"></p>
+          </div>
+          <button id="bulk-ai-close-button" class="ghost-button" type="button">閉じる</button>
+        </header>
+
+        <section class="stack">
+          <div class="section-header">
+            <h3>AIへ送る</h3>
+            <button id="bulk-ai-copy-button" class="primary-button" type="button">AI用にまとめてコピー</button>
+          </div>
+          <p id="bulk-ai-active-warning" class="subtle" hidden></p>
+          <div id="bulk-ai-people" class="filter-bar"></div>
+        </section>
+
+        <section class="stack">
+          <h3>返ってきた文を貼る</h3>
+          <textarea id="bulk-ai-response-text" rows="9" placeholder="GPTs などから返ってきた JSON をそのまま貼り付け"></textarea>
+          <div class="actions wrap">
+            <button id="bulk-ai-review-button" class="secondary-button" type="button">返答を確認する</button>
+          </div>
+        </section>
+
+        <section class="stack">
+          <div class="section-header">
+            <h3>反映前の確認</h3>
+            <button id="bulk-ai-apply-button" class="primary-button" type="button">一括反映</button>
+          </div>
+          <p id="bulk-ai-preview-meta" class="subtle"></p>
+          <div id="bulk-ai-preview-list" class="stack"></div>
+        </section>
+      </div>
     </dialog>
 
     <dialog id="discard-handoff-dialog" class="sheet">
