@@ -147,12 +147,13 @@ let state = loadState();
 let bulkAiSession = loadBulkAiSession();
 let bulkAiPreview = null;
 let bulkAiParseError = "";
-let ui = {
-  searchQuery: "",
-  boardFilter: "all",
-  folderFilter: "all",
-  editingPersonId: null,
-  capturePersonId: null,
+  let ui = {
+    searchQuery: "",
+    boardFilter: "all",
+    folderFilter: "all",
+    boardSummaryExpanded: false,
+    editingPersonId: null,
+    capturePersonId: null,
   captureObservedAt: new Date().toISOString(),
   captureMemoId: null,
   captureAutosaveTimer: 0,
@@ -246,6 +247,18 @@ function bindEvents() {
   });
   elements.openBulkAiButton.addEventListener("click", () => {
     openBulkAiDialog();
+  });
+  elements.boardSummary.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-board-summary-toggle]");
+    if (!toggle) return;
+    ui.boardSummaryExpanded = !ui.boardSummaryExpanded;
+    renderBoardSummary(
+      buildBoardSummary({
+        people: state.people,
+        getPendingCount: pendingMemoCount,
+        folderCount: state.folders.length,
+      }),
+    );
   });
 
   elements.openSettingsButton.addEventListener("click", () => {
@@ -934,11 +947,20 @@ function buildHandoffBundle(personId) {
 }
 
 function renderBoardSummary({ totalCount, pendingCount, folderCount }) {
-  elements.boardSummary.innerHTML = [
-    summaryPillMarkup("登録", totalCount),
-    summaryPillMarkup("未整理あり", pendingCount),
-    summaryPillMarkup("フォルダ", folderCount),
-  ].join("");
+  const toggleLabel = ui.boardSummaryExpanded ? "状況を隠す" : "状況を見る";
+  const metricsMarkup = ui.boardSummaryExpanded
+    ? [
+        summaryPillMarkup("登録", totalCount),
+        summaryPillMarkup("未整理あり", pendingCount),
+        summaryPillMarkup("フォルダ", folderCount),
+      ].join("")
+    : "";
+  elements.boardSummary.innerHTML = `
+    <button type="button" class="ghost-button board-summary-toggle" data-board-summary-toggle="true">
+      ${escapeHtml(toggleLabel)}
+    </button>
+    ${metricsMarkup}
+  `;
 }
 
 function summaryPillMarkup(label, value) {

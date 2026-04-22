@@ -162,6 +162,11 @@ textarea {
   margin-top: 14px;
 }
 
+.board-summary-toggle {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
 .summary-pill,
 .filter-pill {
   border-radius: 18px;

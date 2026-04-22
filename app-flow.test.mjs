@@ -189,6 +189,21 @@ test("top search can find kanji names from hiragana input", async () => {
   });
 });
 
+test("board summary hides counts until requested", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+
+    assert.equal(await page.locator("#board-summary .summary-pill").count(), 0);
+
+    await page.locator("#board-summary").getByRole("button", { name: "状況を見る" }).click();
+
+    assert.equal(await page.locator("#board-summary .summary-pill").count(), 3);
+    await assert.doesNotReject(() =>
+      page.locator("#board-summary").getByRole("button", { name: "状況を隠す" }).waitFor(),
+    );
+  });
+});
+
 test("creating a folder from the board adds the chip without auto-assigning every visible name", async () => {
   await withPage(async (page, baseUrl) => {
     await page.addInitScript(() => {
