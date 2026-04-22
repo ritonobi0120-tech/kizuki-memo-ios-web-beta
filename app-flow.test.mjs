@@ -232,6 +232,29 @@ test("selected folder can be deleted from the board", async () => {
   });
 });
 
+test("selected folder can be renamed from the board", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.addInitScript(() => {
+      window.__promptAnswers = ["旧フォルダ", "青", "新フォルダ"];
+      window.prompt = () => window.__promptAnswers.shift() ?? "";
+    });
+
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await page.locator("#folder-filter-bar").getByRole("button", { name: /旧フォルダ/ }).click();
+
+    await page.getByRole("button", { name: "名前を変える" }).click();
+
+    await assert.doesNotReject(() =>
+      page.locator("#folder-filter-bar .filter-pill.is-active", { hasText: "新フォルダ" }).waitFor(),
+    );
+    await assert.doesNotReject(() =>
+      page.locator("#folder-manage-title", { hasText: "新フォルダ" }).waitFor(),
+    );
+    assert.equal(await page.locator("#folder-filter-bar").getByRole("button", { name: /旧フォルダ/ }).count(), 0);
+  });
+});
+
 test("selection mode moves chosen names into an existing folder", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });

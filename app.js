@@ -38,7 +38,7 @@ import { matchesPersonSearch } from "./name-search.mjs";
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-22 フォルダ管理と検索";
+const WEB_BETA_BUILD_LABEL = "2026-04-22 フォルダ必須導線補完";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -72,6 +72,7 @@ const elements = {
   folderManageCard: document.getElementById("folder-manage-card"),
   folderManageTitle: document.getElementById("folder-manage-title"),
   folderManageCaption: document.getElementById("folder-manage-caption"),
+  renameFolderButton: document.getElementById("rename-folder-button"),
   changeFolderColorButton: document.getElementById("change-folder-color-button"),
   deleteFolderButton: document.getElementById("delete-folder-button"),
   boardFilterBar: document.getElementById("board-filter-bar"),
@@ -233,6 +234,9 @@ function bindEvents() {
   });
   elements.addFolderButton.addEventListener("click", () => {
     createFolderFromPrompt();
+  });
+  elements.renameFolderButton.addEventListener("click", () => {
+    renameSelectedFolder();
   });
   elements.changeFolderColorButton.addEventListener("click", () => {
     changeSelectedFolderColor();
@@ -1041,6 +1045,18 @@ function changeSelectedFolderColor() {
   persistState();
   render();
   toast("フォルダの色を変えました");
+}
+
+function renameSelectedFolder() {
+  const folder = selectedFolder();
+  if (!folder) return;
+  const nextName = window.prompt("フォルダ名を入れてください", folder.name);
+  if (!nextName || !nextName.trim()) return;
+  folder.name = nextName.trim();
+  folder.updatedAt = new Date().toISOString();
+  persistState();
+  render();
+  toast("フォルダ名を変えました");
 }
 
 function deleteSelectedFolder() {
