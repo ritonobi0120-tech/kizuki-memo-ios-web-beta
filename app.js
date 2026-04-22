@@ -38,7 +38,7 @@ import { matchesPersonSearch } from "./name-search.mjs";
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-22 フォルダ必須導線補完";
+const WEB_BETA_BUILD_LABEL = "2026-04-22 検索安定と一覧整理";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
