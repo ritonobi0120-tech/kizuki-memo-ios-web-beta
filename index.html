@@ -147,7 +147,7 @@
           <div>
             <p class="eyebrow">長押しプレビュー</p>
             <h2 id="preview-person-name">名前</h2>
-            <p id="preview-summary-text" class="subtle"></p>
+            <p class="subtle">最近の整理ノートを下で確認できます。</p>
           </div>
           <button id="preview-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
@@ -158,6 +158,17 @@
             <button id="preview-create-folder-button" class="ghost-button" type="button">新しく作る</button>
           </div>
           <div id="preview-folder-chips" class="filter-bar"></div>
+        </section>
+
+        <section class="stack">
+          <div class="section-header">
+            <h3>整理ノート</h3>
+            <p id="preview-summary-text" class="subtle"></p>
+          </div>
+          <button id="preview-summary-card" class="summary-preview-card" type="button">
+            <span id="preview-summary-card-body" class="summary-preview-body"></span>
+            <span class="summary-preview-hint">タップで全文を見る / 自分で直す</span>
+          </button>
         </section>
 
         <section class="stack">
@@ -183,6 +194,29 @@
           <button id="preview-quick-record" class="primary-button" type="button">この名前をすぐ記録する</button>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="summary-dialog" class="sheet">
+      <form method="dialog" class="sheet-content stack wide">
+        <header class="sheet-header">
+          <div>
+            <p class="eyebrow">整理ノート</p>
+            <h2 id="summary-person-name">名前</h2>
+            <p id="summary-meta" class="subtle"></p>
+          </div>
+          <button id="summary-close-button" class="ghost-button" type="button">閉じる</button>
+        </header>
+
+        <label class="stack">
+          <span class="label">整理ノート</span>
+          <textarea id="summary-editor" rows="10" placeholder="整理ノートをここで手直しできます"></textarea>
+        </label>
+
+        <div class="actions">
+          <button id="summary-cancel-button" class="ghost-button" type="button">キャンセル</button>
+          <button id="summary-save-button" class="primary-button" type="submit">保存</button>
+        </div>
+      </form>
     </dialog>
 
     <dialog id="move-folder-dialog" class="sheet">
@@ -266,6 +300,7 @@
             <h3>反映前の確認</h3>
             <button id="bulk-ai-apply-button" class="primary-button" type="button">一括反映</button>
           </div>
+          <p id="bulk-ai-result" class="status-note" hidden></p>
           <p id="bulk-ai-preview-meta" class="subtle"></p>
           <div id="bulk-ai-preview-list" class="stack"></div>
         </section>
@@ -306,6 +341,7 @@
               <button id="refresh-app-button" class="primary-button" type="button">最新版に更新する</button>
               <button id="open-public-beta-button" class="secondary-button" type="button">公開ページを開く</button>
             </div>
+            <p id="settings-update-status" class="subtle"></p>
             <p class="subtle">ホーム画面の見た目が古い時も、公開ページを開き直してからホーム画面へ置き直すと戻しやすいです。</p>
           </div>
           <p class="subtle">この beta は端末内に保存します。念のため JSON で書き出しておくと安心です。</p>

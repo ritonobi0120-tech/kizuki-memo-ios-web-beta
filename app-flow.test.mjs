@@ -189,18 +189,12 @@ test("top search can find kanji names from hiragana input", async () => {
   });
 });
 
-test("board summary hides counts until requested", async () => {
+test("board top no longer shows count summary chips", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
 
     assert.equal(await page.locator("#board-summary .summary-pill").count(), 0);
-
-    await page.locator("#board-summary").getByRole("button", { name: "状況を見る" }).click();
-
-    assert.equal(await page.locator("#board-summary .summary-pill").count(), 3);
-    await assert.doesNotReject(() =>
-      page.locator("#board-summary").getByRole("button", { name: "状況を隠す" }).waitFor(),
-    );
+    assert.equal(await page.locator("#board-summary").getByRole("button").count(), 0);
   });
 });
 
@@ -336,6 +330,7 @@ test("bulk ai handoff copies all pending people and applies summaries back", asy
     await assert.doesNotReject(() => page.getByText("反映する名前").waitFor());
 
     await page.getByRole("button", { name: "一括反映" }).click();
+    await assert.doesNotReject(() => page.locator("#bulk-ai-result", { hasText: /人に反映しました/ }).waitFor());
     await assert.doesNotReject(() => page.locator("#bulk-ai-summary", { hasText: "未整理メモはありません。" }).waitFor());
   });
 });
@@ -443,6 +438,29 @@ test("preview keeps the AI copy button visible for the selected name", async () 
 
     await assert.doesNotReject(() => page.locator("#preview-copy-ai-button").waitFor());
     assert.match(await page.locator("#preview-copy-ai-button").textContent(), /AI 用にコピー（\d+件）/);
+  });
+});
+
+test("preview summary opens a full editor and saves the updated note", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await openPreviewViaLongPress(page, "田中 はる");
+
+    await assert.doesNotReject(() => page.locator("#preview-summary-card").waitFor());
+    await assert.doesNotReject(() => page.locator("#preview-summary-card", { hasText: "タップで全文を見る" }).waitFor());
+
+    await page.locator("#preview-summary-card").click();
+    await page.locator("#summary-dialog[open]").waitFor();
+    assert.match(await page.locator("#summary-editor").inputValue(), /最近は自分から動き始める/);
+
+    await page.locator("#summary-editor").fill("手直しした整理ノートです。");
+    await page.locator("#summary-save-button").click();
+
+    await page.locator("#summary-dialog").waitFor({ state: "hidden" });
+    await page.locator("#preview-dialog[open]").waitFor();
+    await assert.doesNotReject(() =>
+      page.locator("#preview-summary-card", { hasText: "手直しした整理ノートです。" }).waitFor(),
+    );
   });
 });
 

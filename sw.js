@@ -1,10 +1,14 @@
-const CACHE_NAME = "kizuki-ios-web-beta-v4";
+const CACHE_NAME = "kizuki-ios-web-beta-v5";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./dom-helpers.mjs",
+  "./name-search.mjs",
   "./speech-support.mjs",
+  "./storage-logic.mjs",
+  "./ui-logic.mjs",
   "./manifest.webmanifest",
   "./icon.svg",
   "./apple-touch-icon.png",
@@ -34,7 +38,24 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-  event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request)),
-  );
+  const requestUrl = new URL(event.request.url);
+  const isSameOrigin = requestUrl.origin === self.location.origin;
+  const prefersFreshCopy =
+    isSameOrigin &&
+    ["document", "script", "style", "manifest"].includes(event.request.destination);
+
+  if (prefersFreshCopy) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match(event.request)),
+    );
+    return;
+  }
+
+  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
 });

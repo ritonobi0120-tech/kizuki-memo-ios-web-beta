@@ -489,6 +489,34 @@ button {
   border: 1px solid rgba(207, 111, 58, 0.16);
 }
 
+.summary-preview-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(207, 111, 58, 0.16);
+  text-align: left;
+}
+
+.summary-preview-body {
+  color: var(--text);
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+}
+
+.summary-preview-hint {
+  color: var(--accent-strong);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .settings-update-card {
   padding: 16px;
   border-radius: 20px;
@@ -594,6 +622,33 @@ button {
 
 .bulk-preview-row--failure strong {
   color: var(--danger);
+}
+
+.status-note {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.status-note.is-success {
+  background: rgba(41, 138, 88, 0.12);
+  border-color: rgba(41, 138, 88, 0.24);
+  color: #1f6b45;
+}
+
+.status-note.is-warning {
+  background: rgba(179, 65, 61, 0.1);
+  border-color: rgba(179, 65, 61, 0.2);
+  color: #8d2f2c;
+}
+
+.primary-button.is-busy,
+.secondary-button.is-busy,
+.ghost-button.is-busy {
+  opacity: 0.72;
 }
 
 .toast {

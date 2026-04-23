@@ -38,7 +38,7 @@ import { matchesPersonSearch } from "./name-search.mjs";
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-22 検索安定と一覧整理";
+const WEB_BETA_BUILD_LABEL = "2026-04-23 反映通知と整理ノート見直し";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -50,6 +50,7 @@ const FOLDER_COLOR_CHOICES = [
 const dialogForms = {
   person: document.querySelector("#person-dialog form"),
   capture: document.querySelector("#capture-dialog form"),
+  summary: document.querySelector("#summary-dialog form"),
   handoff: document.querySelector("#handoff-dialog form"),
 };
 const dialogs = {
@@ -57,6 +58,7 @@ const dialogs = {
   capture: document.getElementById("capture-dialog"),
   discardCapture: document.getElementById("discard-capture-dialog"),
   preview: document.getElementById("preview-dialog"),
+  summary: document.getElementById("summary-dialog"),
   moveFolder: document.getElementById("move-folder-dialog"),
   handoff: document.getElementById("handoff-dialog"),
   bulkAi: document.getElementById("bulk-ai-dialog"),
@@ -99,6 +101,8 @@ const elements = {
   discardCaptureConfirmButton: document.getElementById("discard-capture-confirm-button"),
   previewPersonName: document.getElementById("preview-person-name"),
   previewSummaryText: document.getElementById("preview-summary-text"),
+  previewSummaryCard: document.getElementById("preview-summary-card"),
+  previewSummaryCardBody: document.getElementById("preview-summary-card-body"),
   previewFolderChips: document.getElementById("preview-folder-chips"),
   previewCreateFolderButton: document.getElementById("preview-create-folder-button"),
   previewMemoList: document.getElementById("preview-memo-list"),
@@ -107,6 +111,12 @@ const elements = {
   previewQuickRecord: document.getElementById("preview-quick-record"),
   previewAiButton: document.getElementById("preview-ai-button"),
   previewCloseButton: document.getElementById("preview-close-button"),
+  summaryPersonName: document.getElementById("summary-person-name"),
+  summaryMeta: document.getElementById("summary-meta"),
+  summaryEditor: document.getElementById("summary-editor"),
+  summaryCloseButton: document.getElementById("summary-close-button"),
+  summaryCancelButton: document.getElementById("summary-cancel-button"),
+  summarySaveButton: document.getElementById("summary-save-button"),
   moveFolderSummary: document.getElementById("move-folder-summary"),
   moveFolderOptions: document.getElementById("move-folder-options"),
   moveFolderNewButton: document.getElementById("move-folder-new-button"),
@@ -126,6 +136,7 @@ const elements = {
   bulkAiResponseText: document.getElementById("bulk-ai-response-text"),
   bulkAiReviewButton: document.getElementById("bulk-ai-review-button"),
   bulkAiApplyButton: document.getElementById("bulk-ai-apply-button"),
+  bulkAiResult: document.getElementById("bulk-ai-result"),
   bulkAiPreviewMeta: document.getElementById("bulk-ai-preview-meta"),
   bulkAiPreviewList: document.getElementById("bulk-ai-preview-list"),
   discardHandoffCancelButton: document.getElementById("discard-handoff-cancel-button"),
@@ -134,6 +145,7 @@ const elements = {
   webBuildLabel: document.getElementById("web-build-label"),
   refreshAppButton: document.getElementById("refresh-app-button"),
   openPublicBetaButton: document.getElementById("open-public-beta-button"),
+  settingsUpdateStatus: document.getElementById("settings-update-status"),
   exportJsonButton: document.getElementById("export-json-button"),
   importJsonInput: document.getElementById("import-json-input"),
   seedDemoButton: document.getElementById("seed-demo-button"),
@@ -147,17 +159,22 @@ let state = loadState();
 let bulkAiSession = loadBulkAiSession();
 let bulkAiPreview = null;
 let bulkAiParseError = "";
-  let ui = {
-    searchQuery: "",
-    boardFilter: "all",
-    folderFilter: "all",
-    boardSummaryExpanded: false,
-    editingPersonId: null,
-    capturePersonId: null,
+let bulkAiApplying = false;
+let bulkAiLastResult = null;
+let settingsUpdateStatus = "";
+let ui = {
+  searchQuery: "",
+  boardFilter: "all",
+  folderFilter: "all",
+  boardSummaryExpanded: false,
+  editingPersonId: null,
+  capturePersonId: null,
   captureObservedAt: new Date().toISOString(),
   captureMemoId: null,
   captureAutosaveTimer: 0,
   previewPersonId: null,
+  summaryEditorPersonId: null,
+  returnToPreviewAfterSummary: false,
   selectionMode: false,
   selectedPersonIds: [],
   handoffPersonId: null,
@@ -326,11 +343,17 @@ function bindEvents() {
     if (personId) openHandoff(personId);
   });
 
+  elements.previewSummaryCard.addEventListener("click", () => {
+    if (!ui.previewPersonId) return;
+    openSummaryEditor(ui.previewPersonId, { fromPreview: true });
+  });
   elements.previewCloseButton.addEventListener("click", () => dialogs.preview.close());
   elements.previewCreateFolderButton.addEventListener("click", () => {
     if (!ui.previewPersonId) return;
     createFolderFromPrompt(ui.previewPersonId);
   });
+  elements.summaryCloseButton.addEventListener("click", () => closeSummaryEditor());
+  elements.summaryCancelButton.addEventListener("click", () => closeSummaryEditor());
   elements.moveFolderCancelButton.addEventListener("click", () => dialogs.moveFolder.close());
   elements.moveFolderNewButton.addEventListener("click", () => {
     const selectedIds = [...ui.selectedPersonIds];
@@ -353,6 +376,14 @@ function bindEvents() {
     event.preventDefault();
     saveSummaryFromHandoff();
   });
+  dialogForms.summary.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveSummaryEditor();
+  });
+  dialogs.summary.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeSummaryEditor();
+  });
 
   elements.refreshAppButton.addEventListener("click", refreshAppVersion);
   elements.openPublicBetaButton.addEventListener("click", openPublicBetaPage);
@@ -363,6 +394,8 @@ function bindEvents() {
     bulkAiSession = null;
     bulkAiPreview = null;
     bulkAiParseError = "";
+    bulkAiApplying = false;
+    bulkAiLastResult = null;
     persistState();
     persistBulkAiSession();
     render();
@@ -374,6 +407,8 @@ function bindEvents() {
     bulkAiSession = null;
     bulkAiPreview = null;
     bulkAiParseError = "";
+    bulkAiApplying = false;
+    bulkAiLastResult = null;
     persistState();
     persistBulkAiSession();
     render();
@@ -402,6 +437,7 @@ function render() {
   renderPeople();
   renderCapture();
   renderPreview();
+  renderSummaryEditor();
   renderHandoff();
   renderBulkAi();
   renderSpeechStatus();
@@ -414,6 +450,7 @@ function renderInstallCard() {
 
 function renderSettingsMeta() {
   elements.webBuildLabel.textContent = `現在の版: ${WEB_BETA_BUILD_LABEL}`;
+  elements.settingsUpdateStatus.textContent = settingsUpdateStatus;
 }
 
 function renderSelectionActions() {
@@ -539,8 +576,12 @@ function renderPreview() {
   const person = findPerson(ui.previewPersonId);
   if (!person) return;
   const bundle = currentHandoffBundle(person.id);
+  const summary = summaryFor(person.id);
   elements.previewPersonName.textContent = person.name;
-  elements.previewSummaryText.textContent = summaryFor(person.id)?.summaryText || "整理ノートはまだありません";
+  elements.previewSummaryText.textContent = summary?.summaryUpdatedAt
+    ? `最終更新 ${formatDateTime(summary.summaryUpdatedAt)}`
+    : "まだ整理ノートはありません";
+  elements.previewSummaryCardBody.textContent = summary?.summaryText || "まだ整理ノートはありません。タップするとここで作れます。";
   renderPreviewFolders(person);
   elements.previewAiSummary.textContent =
     bundle.includedMemoIds.length > 0
@@ -559,6 +600,19 @@ function renderPreview() {
   }
   for (const memo of memos) {
     elements.previewMemoList.appendChild(createSwipeMemoCard(memo));
+  }
+}
+
+function renderSummaryEditor() {
+  const person = ui.summaryEditorPersonId ? findPerson(ui.summaryEditorPersonId) : null;
+  if (!person) return;
+  const summary = summaryFor(person.id);
+  elements.summaryPersonName.textContent = person.name;
+  elements.summaryMeta.textContent = summary?.summaryUpdatedAt
+    ? `最終更新 ${formatDateTime(summary.summaryUpdatedAt)}`
+    : "まだ整理ノートはありません";
+  if (document.activeElement !== elements.summaryEditor) {
+    elements.summaryEditor.value = summary?.summaryText ?? "";
   }
 }
 
@@ -623,7 +677,13 @@ function renderBulkAi() {
   elements.bulkAiActiveWarning.textContent = bulkAiSession
     ? `未反映の一括整理があります。${bulkAiSession.people.length}人 / ${bulkAiSession.people.reduce((sum, person) => sum + person.includedMemoIds.length, 0)}件`
     : "";
-  elements.bulkAiPreviewMeta.textContent = bulkAiParseError
+  elements.bulkAiResult.hidden = !bulkAiLastResult;
+  elements.bulkAiResult.textContent = bulkAiLastResult?.message ?? "";
+  elements.bulkAiResult.classList.toggle("is-success", bulkAiLastResult?.tone === "success");
+  elements.bulkAiResult.classList.toggle("is-warning", bulkAiLastResult?.tone === "warning");
+  elements.bulkAiPreviewMeta.textContent = bulkAiApplying
+    ? "整理ノートへ反映中です…"
+    : bulkAiParseError
     ? bulkAiParseErrorToText(bulkAiParseError)
     : bulkAiPreview
       ? `反映OK ${bulkAiPreview.successEntries.length}人 / 未反映 ${bulkAiPreview.failureEntries.length}人`
@@ -631,7 +691,11 @@ function renderBulkAi() {
   elements.bulkAiPreviewList.innerHTML = bulkAiParseError
     ? `<p class=\"subtle\">${escapeHtml(bulkAiParseErrorToText(bulkAiParseError))}</p>`
     : renderBulkAiPreviewRows();
-  elements.bulkAiApplyButton.disabled = !bulkAiPreview || bulkAiPreview.successEntries.length === 0;
+  elements.bulkAiReviewButton.disabled = bulkAiApplying;
+  elements.bulkAiCopyButton.disabled = bulkAiApplying;
+  elements.bulkAiApplyButton.disabled = bulkAiApplying || !bulkAiPreview || bulkAiPreview.successEntries.length === 0;
+  elements.bulkAiApplyButton.textContent = bulkAiApplying ? "反映中…" : "一括反映";
+  elements.bulkAiApplyButton.classList.toggle("is-busy", bulkAiApplying);
 }
 
 function renderBulkAiPreviewRows() {
@@ -698,6 +762,33 @@ function openPreview(personId) {
   markOpened(personId);
 }
 
+function openSummaryEditor(personId, { fromPreview = false } = {}) {
+  const person = findPerson(personId);
+  if (!person) return;
+  ui.summaryEditorPersonId = personId;
+  ui.returnToPreviewAfterSummary = fromPreview;
+  renderSummaryEditor();
+  if (fromPreview && dialogs.preview.open) {
+    dialogs.preview.close("summary");
+  }
+  showPreparedDialog(dialogs.summary);
+  window.setTimeout(() => elements.summaryEditor.focus(), 30);
+}
+
+function closeSummaryEditor({ reopenPreview = ui.returnToPreviewAfterSummary } = {}) {
+  const personId = ui.summaryEditorPersonId;
+  dialogs.summary.close("close");
+  ui.summaryEditorPersonId = null;
+  ui.returnToPreviewAfterSummary = false;
+  if (reopenPreview && personId) {
+    window.setTimeout(() => {
+      ui.previewPersonId = personId;
+      renderPreview();
+      showPreparedDialog(dialogs.preview);
+    }, 0);
+  }
+}
+
 function openHandoff(personId) {
   const preparedForSamePerson = ui.handoffPersonId === personId && ui.handoffPreparedMemoIds.length > 0;
   if (!preparedForSamePerson) {
@@ -712,11 +803,27 @@ function openHandoff(personId) {
 }
 
 function openBulkAiDialog() {
+  bulkAiApplying = false;
   bulkAiPreview = null;
   bulkAiParseError = "";
   elements.bulkAiResponseText.value = "";
   renderBulkAi();
   showPreparedDialog(dialogs.bulkAi);
+}
+
+function upsertSummary(personId, text, now = new Date().toISOString()) {
+  const existing = state.summaries.find((item) => item.personId === personId);
+  if (existing) {
+    existing.summaryText = text;
+    existing.summaryUpdatedAt = now;
+  } else {
+    state.summaries.push({
+      personId,
+      summaryText: text,
+      summaryUpdatedAt: now,
+    });
+  }
+  return now;
 }
 
 function savePerson(name) {
@@ -847,25 +954,25 @@ function saveSummaryFromHandoff() {
   const personId = ui.handoffPersonId;
   const text = elements.handoffImportText.value.trim();
   if (!personId || !text) return;
-  const now = new Date().toISOString();
-  const existing = state.summaries.find((item) => item.personId === personId);
-  if (existing) {
-    existing.summaryText = text;
-    existing.summaryUpdatedAt = now;
-  } else {
-    state.summaries.push({
-      personId,
-      summaryText: text,
-      summaryUpdatedAt: now,
-    });
-  }
+  upsertSummary(personId, text);
   const includedIds = [...ui.handoffPreparedMemoIds];
   state.memos = state.memos.filter((memo) => !includedIds.includes(memo.id));
   persistState();
   dialogs.handoff.close("saved");
   clearHandoffDraft();
   render();
-  toast("整理ノートを保存しました");
+  toast(`整理ノートを保存しました（${findPerson(personId)?.name ?? "名前"}）`);
+}
+
+function saveSummaryEditor() {
+  const personId = ui.summaryEditorPersonId;
+  const text = elements.summaryEditor.value.trim();
+  if (!personId || !text) return;
+  upsertSummary(personId, text);
+  persistState();
+  render();
+  closeSummaryEditor({ reopenPreview: true });
+  toast(`整理ノートを更新しました（${findPerson(personId)?.name ?? "名前"}）`);
 }
 
 function deleteMemo(memoId) {
@@ -947,20 +1054,7 @@ function buildHandoffBundle(personId) {
 }
 
 function renderBoardSummary({ totalCount, pendingCount, folderCount }) {
-  const toggleLabel = ui.boardSummaryExpanded ? "状況を隠す" : "状況を見る";
-  const metricsMarkup = ui.boardSummaryExpanded
-    ? [
-        summaryPillMarkup("登録", totalCount),
-        summaryPillMarkup("未整理あり", pendingCount),
-        summaryPillMarkup("フォルダ", folderCount),
-      ].join("")
-    : "";
-  elements.boardSummary.innerHTML = `
-    <button type="button" class="ghost-button board-summary-toggle" data-board-summary-toggle="true">
-      ${escapeHtml(toggleLabel)}
-    </button>
-    ${metricsMarkup}
-  `;
+  elements.boardSummary.innerHTML = "";
 }
 
 function summaryPillMarkup(label, value) {
@@ -1224,8 +1318,10 @@ async function copyBulkAiBundle() {
     if (!shouldReplace) return;
   }
   bulkAiSession = bundle.session;
+  bulkAiApplying = false;
   bulkAiPreview = null;
   bulkAiParseError = "";
+  bulkAiLastResult = null;
   persistBulkAiSession();
   renderBulkAi();
   try {
@@ -1237,9 +1333,11 @@ async function copyBulkAiBundle() {
 }
 
 function reviewBulkAiResponse() {
+  bulkAiApplying = false;
   if (!bulkAiSession) {
     bulkAiParseError = "batch_mismatch";
     bulkAiPreview = null;
+    bulkAiLastResult = null;
     renderBulkAi();
     return;
   }
@@ -1249,24 +1347,24 @@ function reviewBulkAiResponse() {
   });
   bulkAiParseError = outcome.parseError || "";
   bulkAiPreview = outcome.preview;
+  bulkAiLastResult = null;
   renderBulkAi();
 }
 
-function applyBulkAiPreview() {
+async function applyBulkAiPreview() {
   if (!bulkAiPreview || bulkAiPreview.successEntries.length === 0) return;
+  const successCount = bulkAiPreview.successEntries.length;
+  const failureCount = bulkAiPreview.failureEntries.length;
+  bulkAiApplying = true;
+  bulkAiLastResult = {
+    tone: "success",
+    message: "整理ノートへ反映しています…",
+  };
+  renderBulkAi();
+  await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
   const now = new Date().toISOString();
   bulkAiPreview.successEntries.forEach((entry) => {
-    const existing = state.summaries.find((summary) => summary.personId === entry.personId);
-    if (existing) {
-      existing.summaryText = entry.summaryText;
-      existing.summaryUpdatedAt = now;
-    } else {
-      state.summaries.push({
-        personId: entry.personId,
-        summaryText: entry.summaryText,
-        summaryUpdatedAt: now,
-      });
-    }
+    upsertSummary(entry.personId, entry.summaryText, now);
     state.memos = state.memos.filter((memo) => !entry.includedMemoIds.includes(memo.id));
   });
 
@@ -1282,11 +1380,19 @@ function applyBulkAiPreview() {
   }
   bulkAiPreview = null;
   bulkAiParseError = "";
+  bulkAiApplying = false;
+  bulkAiLastResult = {
+    tone: failureCount > 0 ? "warning" : "success",
+    message:
+      failureCount > 0
+        ? `${successCount}人に反映しました。未反映は ${failureCount} 人です。長押しから整理ノートを見直せます。`
+        : `${successCount}人に反映しました。長押しから整理ノートを見直せます。`,
+  };
   elements.bulkAiResponseText.value = "";
   persistState();
   persistBulkAiSession();
   render();
-  toast("一括で整理ノートへ反映しました");
+  toast(bulkAiLastResult.message, { duration: 4200 });
 }
 
 function pendingMemoCount(personId) {
@@ -1436,6 +1542,8 @@ async function importStateFromJson(event) {
     bulkAiSession = null;
     bulkAiPreview = null;
     bulkAiParseError = "";
+    bulkAiApplying = false;
+    bulkAiLastResult = null;
     persistState();
     persistBulkAiSession();
     render();
@@ -1599,7 +1707,10 @@ function showPreparedDialog(dialog) {
 
 async function refreshAppVersion() {
   elements.refreshAppButton.disabled = true;
-  elements.refreshAppButton.textContent = "更新を確認中…";
+  elements.refreshAppButton.textContent = "最新版を開いています…";
+  elements.refreshAppButton.classList.add("is-busy");
+  settingsUpdateStatus = "キャッシュを消して最新版を開いています…";
+  renderSettingsMeta();
   try {
     if ("serviceWorker" in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations();
@@ -1613,13 +1724,20 @@ async function refreshAppVersion() {
           .map((key) => caches.delete(key).catch(() => false)),
       );
     }
-    toast("最新版を確認して開き直します");
+    const targetUrl = buildRefreshUrl(
+      /^https?:\/\/(127\.0\.0\.1|localhost)/i.test(window.location.href) ? window.location.href : PUBLIC_WEB_BETA_URL,
+      Date.now(),
+    );
+    toast("最新版を開き直します");
     window.setTimeout(() => {
-      window.location.replace(buildRefreshUrl(window.location.href, Date.now()));
+      window.location.replace(targetUrl);
     }, 180);
   } catch {
     elements.refreshAppButton.disabled = false;
     elements.refreshAppButton.textContent = "最新版に更新する";
+    elements.refreshAppButton.classList.remove("is-busy");
+    settingsUpdateStatus = "更新に失敗しました。公開ページを開き直してください。";
+    renderSettingsMeta();
     toast("更新に失敗しました。公開ページを開き直してください。");
   }
 }
