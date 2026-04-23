@@ -5,6 +5,7 @@ const {
   BOARD_FILTERS,
   applyBoardFilter,
   buildBoardSummary,
+  buildBulkAiExport,
   buildHandoffBundle,
   nextMemosForHandoff,
   resolveIncludedMemos,
@@ -87,4 +88,34 @@ test("buildHandoffBundle returns copy-ready markdown for the selected memos", ()
   assert.match(bundle.copyText, /田中 はる/);
   assert.match(bundle.copyText, /昼の記録/);
   assert.doesNotMatch(bundle.copyText, /朝の記録/);
+});
+
+test("buildBulkAiExport adds timeline-first guidance for GPT summaries", () => {
+  const exported = buildBulkAiExport({
+    people: [
+      { id: "a", name: "田中 はる", sortOrder: 0 },
+      { id: "b", name: "佐藤 あおい", sortOrder: 1 },
+    ],
+    memos: [
+      { id: "m0", personId: "a", observedAt: "2026-03-12T09:00:00Z", rawText: "3月の記録", scene: "生活" },
+      { id: "m1", personId: "a", observedAt: "2026-04-17T10:00:00Z", rawText: "4月の記録", scene: "仕事" },
+      { id: "m2", personId: "a", observedAt: "2026-04-18T11:00:00Z", rawText: "最近の記録", scene: "" },
+    ],
+    summaries: [],
+    batchId: "batch-1",
+    exportedAt: "2026-04-23T00:00:00Z",
+  });
+
+  assert.equal(exported.payload.schema, "kizuki-batch-export-v1");
+  assert.match(exported.payload.writingGuide, /時系列/);
+  assert.match(exported.payload.writingGuide, /何月ごろ/);
+  assert.deepEqual(exported.payload.people[0].pendingMemos.map((memo) => memo.rawText), [
+    "3月の記録",
+    "4月の記録",
+    "最近の記録",
+  ]);
+  assert.deepEqual(exported.payload.people[0].timelineBuckets, [
+    { label: "2026-03", memoCount: 1 },
+    { label: "2026-04", memoCount: 2 },
+  ]);
 });

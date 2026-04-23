@@ -33,13 +33,16 @@
         <div class="board-header">
           <div>
             <h2>名前一覧</h2>
-            <p class="subtle">タップですぐ記録。長押しで最近のメモと AI 連携。</p>
+            <p class="subtle">タップですぐ記録。長押しで整理ノートと今たまってる文章を確認できます。</p>
           </div>
           <div class="actions wrap">
             <p id="selection-count-label" class="subtle" hidden></p>
             <button id="select-mode-button" class="ghost-button" type="button">選択</button>
             <button id="move-selected-button" class="ghost-button" type="button" hidden>移動</button>
             <button id="cancel-selection-button" class="ghost-button" type="button" hidden>やめる</button>
+            <button id="start-reorder-button" class="ghost-button" type="button">並び替え</button>
+            <button id="sort-alpha-button" class="ghost-button" type="button" hidden>50音順にする</button>
+            <button id="finish-reorder-button" class="ghost-button" type="button" hidden>完了</button>
             <button id="add-folder-button" class="ghost-button" type="button">フォルダを作る</button>
             <button id="open-bulk-ai-button" class="ghost-button" type="button">一括AI整理</button>
             <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
@@ -144,50 +147,34 @@
     <dialog id="preview-dialog" class="sheet">
       <div class="sheet-content stack wide">
         <header class="sheet-header">
-          <div>
+          <div class="stack">
             <p class="eyebrow">長押しプレビュー</p>
-            <h2 id="preview-person-name">名前</h2>
-            <p class="subtle">最近の整理ノートを下で確認できます。</p>
+            <label class="stack">
+              <span class="label">名前</span>
+              <input id="preview-name-input" type="text" inputmode="text" autocomplete="off" />
+            </label>
+            <p class="subtle">整理ノートと、今たまっている文章だけをすぐ確認できます。</p>
           </div>
           <button id="preview-close-button" class="ghost-button" type="button">閉じる</button>
         </header>
 
         <section class="stack">
           <div class="section-header">
-            <h3>フォルダ</h3>
-            <button id="preview-create-folder-button" class="ghost-button" type="button">新しく作る</button>
-          </div>
-          <div id="preview-folder-chips" class="filter-bar"></div>
-        </section>
-
-        <section class="stack">
-          <div class="section-header">
             <h3>整理ノート</h3>
             <p id="preview-summary-text" class="subtle"></p>
           </div>
-          <button id="preview-summary-card" class="summary-preview-card" type="button">
+          <div id="preview-summary-card" class="summary-preview-card">
             <span id="preview-summary-card-body" class="summary-preview-body"></span>
-            <span class="summary-preview-hint">タップで全文を見る / 自分で直す</span>
-          </button>
+            <button id="open-summary-button" class="secondary-button" type="button">全文を見る / 直す</button>
+          </div>
         </section>
 
         <section class="stack">
           <div class="section-header">
-            <h3>最近のメモ</h3>
-            <p class="subtle">左へスワイプで削除</p>
+            <h3>今たまってる文章</h3>
+            <p class="subtle">日付つきの時系列で軽く見られます。</p>
           </div>
           <div id="preview-memo-list" class="memo-list"></div>
-        </section>
-
-        <section class="preview-ai-card stack">
-          <div class="section-header">
-            <h3>AI に送る準備</h3>
-            <p id="preview-ai-summary" class="subtle"></p>
-          </div>
-          <div class="actions wrap">
-            <button id="preview-copy-ai-button" class="primary-button" type="button">AI 用にコピー</button>
-            <button id="preview-ai-button" class="secondary-button" type="button">AI 用に整理する</button>
-          </div>
         </section>
 
         <div class="actions wrap">

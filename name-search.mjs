@@ -140,6 +140,10 @@ export function matchesPersonSearch({
   return buildSearchTargets({ name, alias, aliasCode, kana }).some((target) => target.includes(normalizedQuery));
 }
 
+export function estimatePersonKana(value = "") {
+  return estimateKana(value);
+}
+
 function buildSearchTargets({ name, alias, aliasCode, kana }) {
   return [
     normalizeSearchText(name),

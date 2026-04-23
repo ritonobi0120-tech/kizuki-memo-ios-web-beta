@@ -33,12 +33,12 @@ import {
   showPreparedDialog as showPreparedDialogHelper,
   syncDialogBodyState as syncDialogBodyStateHelper,
 } from "./dom-helpers.mjs";
-import { matchesPersonSearch } from "./name-search.mjs";
+import { estimatePersonKana, matchesPersonSearch } from "./name-search.mjs";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-23 反映通知と整理ノート見直し";
+const WEB_BETA_BUILD_LABEL = "2026-04-23 長押し見直しと並び替え";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -84,6 +84,9 @@ const elements = {
   selectModeButton: document.getElementById("select-mode-button"),
   moveSelectedButton: document.getElementById("move-selected-button"),
   cancelSelectionButton: document.getElementById("cancel-selection-button"),
+  startReorderButton: document.getElementById("start-reorder-button"),
+  sortAlphaButton: document.getElementById("sort-alpha-button"),
+  finishReorderButton: document.getElementById("finish-reorder-button"),
   addPersonButton: document.getElementById("add-person-button"),
   addFolderButton: document.getElementById("add-folder-button"),
   openBulkAiButton: document.getElementById("open-bulk-ai-button"),
@@ -99,17 +102,13 @@ const elements = {
   speechPreview: document.getElementById("speech-preview"),
   discardCaptureCancelButton: document.getElementById("discard-capture-cancel-button"),
   discardCaptureConfirmButton: document.getElementById("discard-capture-confirm-button"),
-  previewPersonName: document.getElementById("preview-person-name"),
+  previewNameInput: document.getElementById("preview-name-input"),
   previewSummaryText: document.getElementById("preview-summary-text"),
   previewSummaryCard: document.getElementById("preview-summary-card"),
   previewSummaryCardBody: document.getElementById("preview-summary-card-body"),
-  previewFolderChips: document.getElementById("preview-folder-chips"),
-  previewCreateFolderButton: document.getElementById("preview-create-folder-button"),
+  openSummaryButton: document.getElementById("open-summary-button"),
   previewMemoList: document.getElementById("preview-memo-list"),
-  previewAiSummary: document.getElementById("preview-ai-summary"),
-  previewCopyAiButton: document.getElementById("preview-copy-ai-button"),
   previewQuickRecord: document.getElementById("preview-quick-record"),
-  previewAiButton: document.getElementById("preview-ai-button"),
   previewCloseButton: document.getElementById("preview-close-button"),
   summaryPersonName: document.getElementById("summary-person-name"),
   summaryMeta: document.getElementById("summary-meta"),
@@ -173,9 +172,14 @@ let ui = {
   captureMemoId: null,
   captureAutosaveTimer: 0,
   previewPersonId: null,
+  previewNameSaveTimer: 0,
+  previewDraftName: "",
   summaryEditorPersonId: null,
   returnToPreviewAfterSummary: false,
   selectionMode: false,
+  reorderMode: false,
+  reorderDraggingId: null,
+  reorderDropTargetId: null,
   selectedPersonIds: [],
   handoffPersonId: null,
   handoffPreparedMemoIds: [],
@@ -245,6 +249,20 @@ function bindEvents() {
   elements.cancelSelectionButton.addEventListener("click", () => {
     clearSelectionMode();
     render();
+  });
+  elements.startReorderButton.addEventListener("click", () => {
+    ui.reorderMode = true;
+    clearSelectionMode();
+    render();
+  });
+  elements.finishReorderButton.addEventListener("click", () => {
+    ui.reorderMode = false;
+    ui.reorderDraggingId = null;
+    ui.reorderDropTargetId = null;
+    render();
+  });
+  elements.sortAlphaButton.addEventListener("click", () => {
+    normalizeVisiblePeopleToGojuon();
   });
 
   elements.addPersonButton.addEventListener("click", () => {
@@ -332,25 +350,20 @@ function bindEvents() {
     dialogs.preview.close();
     if (personId) openCapture(personId);
   });
-  elements.previewCopyAiButton.addEventListener("click", async () => {
-    if (!ui.previewPersonId) return;
-    await copyHandoffBundleForPerson(ui.previewPersonId);
-  });
-
-  elements.previewAiButton.addEventListener("click", () => {
-    const personId = ui.previewPersonId;
-    dialogs.preview.close();
-    if (personId) openHandoff(personId);
-  });
-
-  elements.previewSummaryCard.addEventListener("click", () => {
+  elements.openSummaryButton.addEventListener("click", () => {
     if (!ui.previewPersonId) return;
     openSummaryEditor(ui.previewPersonId, { fromPreview: true });
   });
-  elements.previewCloseButton.addEventListener("click", () => dialogs.preview.close());
-  elements.previewCreateFolderButton.addEventListener("click", () => {
-    if (!ui.previewPersonId) return;
-    createFolderFromPrompt(ui.previewPersonId);
+  elements.previewNameInput.addEventListener("input", () => {
+    ui.previewDraftName = elements.previewNameInput.value;
+    schedulePreviewNameSave();
+  });
+  elements.previewNameInput.addEventListener("blur", () => {
+    persistPreviewName();
+  });
+  elements.previewCloseButton.addEventListener("click", () => {
+    persistPreviewName();
+    dialogs.preview.close();
   });
   elements.summaryCloseButton.addEventListener("click", () => closeSummaryEditor());
   elements.summaryCancelButton.addEventListener("click", () => closeSummaryEditor());
@@ -383,6 +396,10 @@ function bindEvents() {
   dialogs.summary.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeSummaryEditor();
+  });
+  dialogs.preview.addEventListener("close", () => {
+    persistPreviewName();
+    clearPreviewDraft();
   });
 
   elements.refreshAppButton.addEventListener("click", refreshAppVersion);
@@ -428,6 +445,11 @@ function bindEvents() {
     dialogs.discardHandoff.close("confirm");
     forceCloseHandoff();
   });
+  window.addEventListener("pointermove", handleReorderPointerMove);
+  window.addEventListener("pointerup", handleReorderPointerUp);
+  window.addEventListener("pointercancel", cancelReorderDrag);
+  window.addEventListener("mousemove", handleReorderPointerMove);
+  window.addEventListener("mouseup", handleReorderPointerUp);
 }
 
 function render() {
@@ -455,15 +477,19 @@ function renderSettingsMeta() {
 
 function renderSelectionActions() {
   const selectedCount = ui.selectedPersonIds.length;
+  const reorderActive = ui.reorderMode;
   elements.selectionCountLabel.hidden = !ui.selectionMode;
   elements.selectionCountLabel.textContent = `${selectedCount}人を選択中`;
-  elements.selectModeButton.hidden = ui.selectionMode;
+  elements.selectModeButton.hidden = ui.selectionMode || reorderActive;
   elements.moveSelectedButton.hidden = !ui.selectionMode;
   elements.cancelSelectionButton.hidden = !ui.selectionMode;
   elements.moveSelectedButton.disabled = selectedCount === 0;
-  elements.addPersonButton.hidden = ui.selectionMode;
-  elements.addFolderButton.hidden = ui.selectionMode;
-  elements.openBulkAiButton.hidden = ui.selectionMode;
+  elements.startReorderButton.hidden = ui.selectionMode || reorderActive;
+  elements.sortAlphaButton.hidden = !reorderActive;
+  elements.finishReorderButton.hidden = !reorderActive;
+  elements.addPersonButton.hidden = ui.selectionMode || reorderActive;
+  elements.addFolderButton.hidden = ui.selectionMode || reorderActive;
+  elements.openBulkAiButton.hidden = ui.selectionMode || reorderActive;
 }
 
 function renderPeople() {
@@ -494,6 +520,8 @@ function renderPeople() {
     const isRecentlySaved = person.id === ui.lastSavedPersonId;
     const isSelected = ui.selectedPersonIds.includes(person.id);
     const folder = folderFor(person.folderId);
+    const isDragging = ui.reorderDraggingId === person.id;
+    const isDropTarget = ui.reorderDropTargetId === person.id && !isDragging;
     const badgeMarkup = [
       isSelected ? '<span class="tile-badge tile-badge--selected">選択中</span>' : "",
       isRecentlySaved ? '<span class="tile-badge tile-badge--saved">今の記録</span>' : "",
@@ -503,25 +531,46 @@ function renderPeople() {
     ]
       .filter(Boolean)
       .join("");
-    const tile = document.createElement("button");
-    tile.type = "button";
-    tile.className = `person-tile${isRecentlySaved ? " is-recently-saved" : ""}${ui.selectionMode ? " is-selection-mode" : ""}${isSelected ? " is-selected" : ""}`;
+    const tile = document.createElement(ui.reorderMode ? "article" : "button");
+    if (!ui.reorderMode) {
+      tile.type = "button";
+    }
+    tile.dataset.personId = person.id;
+    tile.className = `person-tile${isRecentlySaved ? " is-recently-saved" : ""}${ui.selectionMode ? " is-selection-mode" : ""}${isSelected ? " is-selected" : ""}${ui.reorderMode ? " is-reorder-mode" : ""}${isDragging ? " is-dragging" : ""}${isDropTarget ? " is-drop-target" : ""}`;
     tile.innerHTML = `
       <div class="tile-top">
-        <strong>${escapeHtml(person.name)}</strong>
-        ${badgeMarkup ? `<div class="tile-badges">${badgeMarkup}</div>` : ""}
+        <div class="stack tile-heading">
+          <strong class="tile-name">${escapeHtml(person.name)}</strong>
+          ${showFolderMeta ? `<div class="tile-meta">${folder ? `${folderIconMarkup(folder)}${escapeHtml(folder.name)}` : "未分類"}</div>` : ""}
+        </div>
+        <div class="tile-side">
+          ${badgeMarkup ? `<div class="tile-badges">${badgeMarkup}</div>` : ""}
+          ${
+            ui.reorderMode
+              ? `<button type="button" class="reorder-handle" data-reorder-handle aria-label="${escapeHtml(person.name)} を並び替え">↕</button>`
+              : ""
+          }
+        </div>
       </div>
-      ${showFolderMeta ? `<div class="tile-meta">${folder ? `${folderIconMarkup(folder)}${escapeHtml(folder.name)}` : "未分類"}</div>` : ""}
     `;
     if (ui.selectionMode) {
       tile.addEventListener("click", () => {
         togglePersonSelection(person.id);
+      });
+    } else if (ui.reorderMode) {
+      const handle = tile.querySelector("[data-reorder-handle]");
+      handle?.addEventListener("pointerdown", (event) => {
+        startReorderDrag(person.id, event);
+      });
+      handle?.addEventListener("mousedown", (event) => {
+        startReorderDrag(person.id, event);
       });
     } else {
       bindLongPress(tile, () => openPreview(person.id), () => openCapture(person.id));
     }
     elements.peopleGrid.appendChild(tile);
   }
+  syncReorderDragState();
 }
 
 function renderFolderManager() {
@@ -575,26 +624,22 @@ function renderPreview() {
   if (!ui.previewPersonId) return;
   const person = findPerson(ui.previewPersonId);
   if (!person) return;
-  const bundle = currentHandoffBundle(person.id);
   const summary = summaryFor(person.id);
-  elements.previewPersonName.textContent = person.name;
+  if (document.activeElement !== elements.previewNameInput) {
+    elements.previewNameInput.value = ui.previewDraftName || person.name;
+  }
   elements.previewSummaryText.textContent = summary?.summaryUpdatedAt
     ? `最終更新 ${formatDateTime(summary.summaryUpdatedAt)}`
     : "まだ整理ノートはありません";
-  elements.previewSummaryCardBody.textContent = summary?.summaryText || "まだ整理ノートはありません。タップするとここで作れます。";
-  renderPreviewFolders(person);
-  elements.previewAiSummary.textContent =
-    bundle.includedMemoIds.length > 0
-      ? `未整理メモ ${bundle.includedMemoIds.length} 件をそのままコピーできます`
-      : "未整理のメモはありません。必要なら整理ノートだけ見直せます。";
-  elements.previewCopyAiButton.textContent = `AI 用にコピー（${bundle.includedMemoIds.length}件）`;
+  elements.previewSummaryCardBody.textContent =
+    summary?.summaryText || "まだ整理ノートはありません。ここからそのまま作れます。";
   elements.previewMemoList.innerHTML = "";
-  const memos = memosFor(person.id);
+  const memos = pendingMemosForPerson(person.id);
   if (memos.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-state";
     empty.hidden = false;
-    empty.innerHTML = "<p>まだ記録はありません。ここからそのまま音声記録を始められます。</p>";
+    empty.innerHTML = "<p>今たまっている未整理の文章はありません。必要ならここからそのまま記録できます。</p>";
     elements.previewMemoList.appendChild(empty);
     return;
   }
@@ -614,40 +659,6 @@ function renderSummaryEditor() {
   if (document.activeElement !== elements.summaryEditor) {
     elements.summaryEditor.value = summary?.summaryText ?? "";
   }
-}
-
-function renderPreviewFolders(person) {
-  const folderButtons = [
-    { id: "unassigned", label: "未分類", selected: !person.folderId },
-    ...state.folders.map((folder) => ({
-      id: folder.id,
-      label: folder.name,
-      iconMarkup: folderIconMarkup(folder),
-      selected: person.folderId === folder.id,
-    })),
-  ];
-  elements.previewFolderChips.innerHTML = folderButtons
-    .map(
-      (folder) => `
-        <button
-          type="button"
-          class="filter-pill${folder.selected ? " is-active" : ""}"
-          data-preview-folder-id="${escapeHtml(String(folder.id))}"
-        >
-          ${folder.iconMarkup || ""}${escapeHtml(folder.label)}
-        </button>
-      `,
-    )
-    .join("");
-  elements.previewFolderChips.querySelectorAll("[data-preview-folder-id]").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (!ui.previewPersonId) return;
-      const nextFolderId = button.dataset.previewFolderId;
-      assignPersonFolder(ui.previewPersonId, nextFolderId === "unassigned" ? null : nextFolderId);
-      renderPreview();
-      renderPeople();
-    });
-  });
 }
 
 function renderHandoff() {
@@ -756,7 +767,11 @@ function openCapture(personId) {
 }
 
 function openPreview(personId) {
+  const person = findPerson(personId);
+  if (!person) return;
+  clearPreviewDraft({ preservePersonId: true });
   ui.previewPersonId = personId;
+  ui.previewDraftName = person.name;
   renderPreview();
   showPreparedDialog(dialogs.preview);
   markOpened(personId);
@@ -852,6 +867,58 @@ function savePerson(name) {
     render();
     return { personId: person.id, created: true };
   }
+}
+
+function schedulePreviewNameSave() {
+  if (ui.previewNameSaveTimer) {
+    window.clearTimeout(ui.previewNameSaveTimer);
+  }
+  ui.previewNameSaveTimer = window.setTimeout(() => {
+    persistPreviewName({ silent: true });
+  }, 500);
+}
+
+function persistPreviewName({ silent = false } = {}) {
+  if (ui.previewNameSaveTimer) {
+    window.clearTimeout(ui.previewNameSaveTimer);
+    ui.previewNameSaveTimer = 0;
+  }
+  const person = ui.previewPersonId ? findPerson(ui.previewPersonId) : null;
+  if (!person) return false;
+  const nextName = (ui.previewDraftName || elements.previewNameInput.value || "").trim();
+  if (!nextName) {
+    ui.previewDraftName = person.name;
+    elements.previewNameInput.value = person.name;
+    return false;
+  }
+  if (nextName === person.name) {
+    ui.previewDraftName = nextName;
+    return false;
+  }
+  person.name = nextName;
+  person.updatedAt = new Date().toISOString();
+  ui.previewDraftName = nextName;
+  persistState();
+  renderPeople();
+  renderPreview();
+  renderSummaryEditor();
+  renderHandoff();
+  if (!silent) {
+    toast("名前を更新しました", { duration: 1600 });
+  }
+  return true;
+}
+
+function clearPreviewDraft({ preservePersonId = false } = {}) {
+  if (ui.previewNameSaveTimer) {
+    window.clearTimeout(ui.previewNameSaveTimer);
+    ui.previewNameSaveTimer = 0;
+  }
+  ui.previewDraftName = "";
+  if (!preservePersonId) {
+    ui.previewPersonId = null;
+  }
+  elements.previewNameInput.value = "";
 }
 
 function clearCaptureDraft() {
@@ -1002,8 +1069,11 @@ function createSwipeMemoCard(memo) {
     <div class="swipe-background">
       <div class="swipe-delete-label">削除</div>
     </div>
-    <article class="memo-card">
-      <div class="memo-time">${formatDateTime(memo.observedAt)}</div>
+    <article class="memo-card memo-card--timeline">
+      <div class="memo-time-row">
+        <div class="memo-time">${formatDateTime(memo.observedAt)}</div>
+        ${memo.scene ? `<span class="memo-scene">${escapeHtml(memo.scene)}</span>` : ""}
+      </div>
       <div class="memo-text">${escapeHtml(memo.rawText).replace(/\n/g, "<br>")}</div>
     </article>
   `;
@@ -1403,6 +1473,17 @@ function pendingMemoCount(personId) {
   }).length;
 }
 
+function pendingMemosForPerson(personId) {
+  const summary = summaryFor(personId);
+  return nextMemosForHandoff({
+    memos: state.memos
+      .filter((memo) => memo.personId === personId)
+      .slice()
+      .sort((a, b) => a.observedAt.localeCompare(b.observedAt)),
+    summaryUpdatedAt: summary?.summaryUpdatedAt ?? null,
+  });
+}
+
 function memosFor(personId) {
   return state.memos
     .filter((memo) => memo.personId === personId)
@@ -1435,6 +1516,111 @@ function currentVisiblePeople() {
     people: folderScopedPeople,
     filter: ui.boardFilter,
     getPendingCount: pendingMemoCount,
+  });
+}
+
+function orderedPeople() {
+  return state.people.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+function applyVisibleOrder(nextVisibleIds, { toastMessage = "" } = {}) {
+  const visibleIds = currentVisiblePeople().map((person) => person.id);
+  if (visibleIds.length < 2 || nextVisibleIds.length !== visibleIds.length) return false;
+  const visibleSet = new Set(visibleIds);
+  if (nextVisibleIds.some((id) => !visibleSet.has(id))) return false;
+  const byId = new Map(state.people.map((person) => [person.id, person]));
+  const ordered = orderedPeople();
+  let visibleIndex = 0;
+  const merged = ordered.map((person) =>
+    visibleSet.has(person.id) ? byId.get(nextVisibleIds[visibleIndex++]) || person : person,
+  );
+  const changed = rewriteSortOrders(merged);
+  if (!changed) return false;
+  persistState();
+  render();
+  if (toastMessage) {
+    toast(toastMessage, { duration: 1800 });
+  }
+  return true;
+}
+
+function rewriteSortOrders(peopleInOrder) {
+  let changed = false;
+  const now = new Date().toISOString();
+  peopleInOrder.forEach((person, index) => {
+    if (person.sortOrder !== index) {
+      person.sortOrder = index;
+      person.updatedAt = now;
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+function moveVisiblePersonBefore(sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return false;
+  const visibleIds = currentVisiblePeople().map((person) => person.id);
+  if (!visibleIds.includes(sourceId) || !visibleIds.includes(targetId)) return false;
+  const reordered = visibleIds.filter((id) => id !== sourceId);
+  const targetIndex = reordered.indexOf(targetId);
+  reordered.splice(targetIndex === -1 ? reordered.length : targetIndex, 0, sourceId);
+  return applyVisibleOrder(reordered, { toastMessage: "順番を入れ替えました" });
+}
+
+function normalizeVisiblePeopleToGojuon() {
+  const orderedVisibleIds = currentVisiblePeople()
+    .slice()
+    .sort((left, right) => {
+      const leftKey = estimatePersonKana(left.name) || left.name;
+      const rightKey = estimatePersonKana(right.name) || right.name;
+      return leftKey.localeCompare(rightKey, "ja");
+    })
+    .map((person) => person.id);
+  applyVisibleOrder(orderedVisibleIds, { toastMessage: "今見えている名前を50音順にしました" });
+}
+
+function startReorderDrag(personId, event) {
+  if (!ui.reorderMode) return;
+  if (ui.reorderDraggingId === personId) return;
+  ui.reorderDraggingId = personId;
+  ui.reorderDropTargetId = personId;
+  event.preventDefault();
+  syncReorderDragState();
+}
+
+function handleReorderPointerMove(event) {
+  if (!ui.reorderDraggingId) return;
+  const targetTile = document.elementFromPoint(event.clientX, event.clientY)?.closest(".person-tile[data-person-id]");
+  ui.reorderDropTargetId = targetTile?.dataset.personId || null;
+  syncReorderDragState();
+}
+
+function handleReorderPointerUp(event) {
+  if (!ui.reorderDraggingId) return;
+  const sourceId = ui.reorderDraggingId;
+  const targetTile = document.elementFromPoint(event.clientX, event.clientY)?.closest(".person-tile[data-person-id]");
+  const targetId = targetTile?.dataset.personId || ui.reorderDropTargetId;
+  cancelReorderDrag();
+  if (targetId && targetId !== sourceId) {
+    moveVisiblePersonBefore(sourceId, targetId);
+  } else {
+    renderPeople();
+  }
+}
+
+function cancelReorderDrag() {
+  if (!ui.reorderDraggingId && !ui.reorderDropTargetId) return;
+  ui.reorderDraggingId = null;
+  ui.reorderDropTargetId = null;
+  syncReorderDragState();
+}
+
+function syncReorderDragState() {
+  document.body.classList.toggle("reorder-dragging", Boolean(ui.reorderDraggingId));
+  document.querySelectorAll(".person-tile[data-person-id]").forEach((node) => {
+    const personId = node.dataset.personId;
+    node.classList.toggle("is-dragging", personId === ui.reorderDraggingId);
+    node.classList.toggle("is-drop-target", personId === ui.reorderDropTargetId && personId !== ui.reorderDraggingId);
   });
 }
 

@@ -122,9 +122,13 @@ export function buildBulkAiExport({
     exportedAt,
     personCount: pendingPeople.length,
     memoCount: pendingPeople.reduce((sum, person) => sum + person.pendingMemos.length, 0),
+    writingGuide:
+      "各 personToken ごとに、まず時系列の流れが伝わる整理ノートを書いてください。何月ごろの出来事か、変化の流れ、最近の様子が後から読み返して分かるように、事実ベースで簡潔にまとめてください。",
     people: pendingPeople.map((person, index) => ({
       personToken: `P${String(index + 1).padStart(2, "0")}`,
+      personName: person.personName,
       currentSummary: person.currentSummary,
+      timelineBuckets: buildTimelineBuckets(person.pendingMemos),
       pendingMemos: person.pendingMemos.map((memo) => ({
         observedAt: memo.observedAt,
         rawText: memo.rawText,
@@ -148,6 +152,16 @@ export function buildBulkAiExport({
       })),
     },
   };
+}
+
+function buildTimelineBuckets(memos) {
+  const counts = new Map();
+  memos.forEach((memo) => {
+    const label = String(memo.observedAt || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(label)) return;
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+  return [...counts.entries()].map(([label, memoCount]) => ({ label, memoCount }));
 }
 
 export function parseBulkAiResponse({ responseText, session }) {

@@ -74,9 +74,9 @@ test("dialogs are populated before showModal is called", async () => {
           id: this.id,
           captureName: document.getElementById("capture-person-name")?.textContent ?? "",
           captureAutosaveStatus: document.getElementById("capture-autosave-status")?.textContent ?? "",
-          previewName: document.getElementById("preview-person-name")?.textContent ?? "",
-          handoffName: document.getElementById("handoff-person-name")?.textContent ?? "",
-          handoffPendingCount: document.getElementById("handoff-pending-count")?.textContent ?? "",
+          previewName: document.getElementById("preview-name-input")?.value ?? "",
+          summaryName: document.getElementById("summary-person-name")?.textContent ?? "",
+          summaryMeta: document.getElementById("summary-meta")?.textContent ?? "",
         });
         return originalShowModal.call(this);
       };
@@ -93,13 +93,13 @@ test("dialogs are populated before showModal is called", async () => {
     await page.locator("#capture-dialog").waitFor({ state: "hidden" });
 
     await openPreviewViaLongPress(page, "回帰テスト");
-    await page.getByRole("button", { name: "AI 用に整理する" }).click();
-    await page.locator("#handoff-dialog[open]").waitFor();
+    await page.getByRole("button", { name: "全文を見る / 直す" }).click();
+    await page.locator("#summary-dialog[open]").waitFor();
 
     const snapshots = await page.evaluate(() => window.__dialogOpenSnapshots);
     const captureSnapshot = snapshots.find((item) => item.id === "capture-dialog");
     const previewSnapshot = snapshots.find((item) => item.id === "preview-dialog");
-    const handoffSnapshot = snapshots.find((item) => item.id === "handoff-dialog");
+    const summarySnapshot = snapshots.find((item) => item.id === "summary-dialog");
 
     assert.ok(captureSnapshot, "capture dialog should open");
     assert.equal(captureSnapshot.captureName, "回帰テスト");
@@ -108,9 +108,9 @@ test("dialogs are populated before showModal is called", async () => {
     assert.ok(previewSnapshot, "preview dialog should open");
     assert.equal(previewSnapshot.previewName, "回帰テスト");
 
-    assert.ok(handoffSnapshot, "handoff dialog should open");
-    assert.equal(handoffSnapshot.handoffName, "回帰テスト");
-    assert.match(handoffSnapshot.handoffPendingCount, /未整理メモ/);
+    assert.ok(summarySnapshot, "summary dialog should open");
+    assert.equal(summarySnapshot.summaryName, "回帰テスト");
+    assert.match(summarySnapshot.summaryMeta, /整理ノート|最終更新/);
   });
 });
 
@@ -431,13 +431,16 @@ test("quick filters hide a newly added no-memo name from pending-only view", asy
   });
 });
 
-test("preview keeps the AI copy button visible for the selected name", async () => {
+test("preview focuses on summary and pending timeline without per-person AI or folder controls", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await openPreviewViaLongPress(page, "田中 はる");
 
-    await assert.doesNotReject(() => page.locator("#preview-copy-ai-button").waitFor());
-    assert.match(await page.locator("#preview-copy-ai-button").textContent(), /AI 用にコピー（\d+件）/);
+    await assert.doesNotReject(() => page.locator("#preview-name-input").waitFor());
+    await assert.doesNotReject(() => page.getByRole("heading", { name: "今たまってる文章" }).waitFor());
+    assert.equal(await page.locator("#preview-create-folder-button").count(), 0);
+    assert.equal(await page.locator("#preview-copy-ai-button").count(), 0);
+    assert.equal(await page.locator("#preview-ai-button").count(), 0);
   });
 });
 
@@ -447,9 +450,9 @@ test("preview summary opens a full editor and saves the updated note", async () 
     await openPreviewViaLongPress(page, "田中 はる");
 
     await assert.doesNotReject(() => page.locator("#preview-summary-card").waitFor());
-    await assert.doesNotReject(() => page.locator("#preview-summary-card", { hasText: "タップで全文を見る" }).waitFor());
+    await assert.doesNotReject(() => page.getByRole("button", { name: "全文を見る / 直す" }).waitFor());
 
-    await page.locator("#preview-summary-card").click();
+    await page.getByRole("button", { name: "全文を見る / 直す" }).click();
     await page.locator("#summary-dialog[open]").waitFor();
     assert.match(await page.locator("#summary-editor").inputValue(), /最近は自分から動き始める/);
 
@@ -461,6 +464,40 @@ test("preview summary opens a full editor and saves the updated note", async () 
     await assert.doesNotReject(() =>
       page.locator("#preview-summary-card", { hasText: "手直しした整理ノートです。" }).waitFor(),
     );
+  });
+});
+
+test("preview name edits autosave when the preview closes", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await openPreviewViaLongPress(page, "田中 はる");
+
+    await page.locator("#preview-name-input").fill("田中 はる 改");
+    await page.locator("#preview-close-button").click();
+    await page.locator("#preview-dialog").waitFor({ state: "hidden" });
+
+    assert.deepEqual(await visibleTileNames(page), ["田中 はる 改", "佐藤 あおい", "鈴木 けん"]);
+  });
+});
+
+test("reorder mode can drag visible names into a new order", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "並び替え" }).click();
+    await dragReorderHandle(page, "鈴木 けん", "田中 はる");
+
+    assert.deepEqual(await visibleTileNames(page), ["鈴木 けん", "田中 はる", "佐藤 あおい"]);
+  });
+});
+
+test("reorder mode can normalize the current visible names into gojuon order", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "並び替え" }).click();
+    await dragReorderHandle(page, "鈴木 けん", "田中 はる");
+    await page.getByRole("button", { name: "50音順にする" }).click();
+
+    assert.deepEqual(await visibleTileNames(page), ["佐藤 あおい", "鈴木 けん", "田中 はる"]);
   });
 });
 
@@ -558,33 +595,6 @@ test("capture close auto-saves the draft and does not require a discard confirma
     await assert.doesNotReject(() =>
       page.locator(".memo-card .memo-text", { hasText: "閉じても残ってほしいメモです。" }).waitFor(),
     );
-  });
-});
-
-test("handoff close confirms before discarding pasted summary", async () => {
-  await withPage(async (page, baseUrl) => {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /田中 はる/ }).click();
-    await page.locator("#capture-dialog[open]").waitFor();
-    await page.locator("#capture-draft").fill("AI 整理前のメモです。");
-    await page.locator("#capture-close-button").click();
-    await page.locator("#capture-dialog").waitFor({ state: "hidden" });
-
-    await openPreviewViaLongPress(page, "田中 はる");
-    await page.getByRole("button", { name: "AI 用に整理する" }).click();
-    await page.locator("#handoff-dialog[open]").waitFor();
-    await page.locator("#handoff-import-text").fill("貼り戻し文を保存前に閉じます。");
-
-    await page.locator("#handoff-close-button").click();
-    await page.locator("#discard-handoff-dialog[open]").waitFor();
-    await page.locator("#discard-handoff-cancel-button").click();
-    await page.locator("#handoff-dialog[open]").waitFor();
-    assert.equal(await page.locator("#handoff-import-text").inputValue(), "貼り戻し文を保存前に閉じます。");
-
-    await page.locator("#handoff-close-button").click();
-    await page.locator("#discard-handoff-dialog[open]").waitFor();
-    await page.locator("#discard-handoff-confirm-button").click();
-    await page.locator("#handoff-dialog").waitFor({ state: "hidden" });
   });
 });
 
@@ -697,6 +707,28 @@ async function openPreviewViaLongPress(page, name) {
     tile.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 80, clientY: 80 }));
   }, name);
   await page.locator("#preview-dialog[open]").waitFor();
+}
+
+async function visibleTileNames(page) {
+  return await page.locator(".person-tile .tile-name").evaluateAll((nodes) =>
+    nodes.map((node) => node.textContent.trim()),
+  );
+}
+
+async function dragReorderHandle(page, sourceName, targetName) {
+  const source = page.locator(".person-tile", { hasText: sourceName }).locator("[data-reorder-handle]");
+  const target = page.locator(".person-tile", { hasText: targetName });
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  assert.ok(sourceBox, "source handle should be visible");
+  assert.ok(targetBox, "target tile should be visible");
+
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 10 });
+  await page.mouse.up();
 }
 
 async function expectText(locator, pattern) {
