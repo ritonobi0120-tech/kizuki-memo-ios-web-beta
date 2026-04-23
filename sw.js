@@ -1,14 +1,14 @@
-const CACHE_NAME = "kizuki-ios-web-beta-v5";
+const CACHE_NAME = "kizuki-ios-web-beta-v6";
 const ASSETS = [
   "./",
   "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./dom-helpers.mjs",
-  "./name-search.mjs",
-  "./speech-support.mjs",
-  "./storage-logic.mjs",
-  "./ui-logic.mjs",
+  "./styles.css?v=20260423-cachefix",
+  "./app.js?v=20260423-cachefix",
+  "./dom-helpers.mjs?v=20260423-cachefix",
+  "./name-search.mjs?v=20260423-cachefix",
+  "./speech-support.mjs?v=20260423-cachefix",
+  "./storage-logic.mjs?v=20260423-cachefix",
+  "./ui-logic.mjs?v=20260423-cachefix",
   "./manifest.webmanifest",
   "./icon.svg",
   "./apple-touch-icon.png",

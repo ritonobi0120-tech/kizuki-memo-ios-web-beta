@@ -2,7 +2,7 @@ import {
   composeDraftText,
   detectSpeechSupport,
   mapSpeechErrorMessage,
-} from "./speech-support.mjs";
+} from "./speech-support.mjs?v=20260423-cachefix";
 import {
   BOARD_FILTERS,
   applyBoardFilter,
@@ -11,7 +11,7 @@ import {
   buildHandoffBundle as buildUiHandoffBundle,
   nextMemosForHandoff,
   parseBulkAiResponse,
-} from "./ui-logic.mjs";
+} from "./ui-logic.mjs?v=20260423-cachefix";
 import {
   DEFAULT_FOLDER_PRESETS,
   buildImportConfirmationMessage,
@@ -24,7 +24,7 @@ import {
   persistAuxJson,
   persistState as persistStoredState,
   summarizeStateCounts as summarizeStoredStateCounts,
-} from "./storage-logic.mjs";
+} from "./storage-logic.mjs?v=20260423-cachefix";
 import {
   bindDialogStateEvents as bindDialogStateEventsHelper,
   bindLongPress as bindLongPressHelper,
@@ -32,13 +32,13 @@ import {
   escapeHtml as escapeHtmlHelper,
   showPreparedDialog as showPreparedDialogHelper,
   syncDialogBodyState as syncDialogBodyStateHelper,
-} from "./dom-helpers.mjs";
-import { estimatePersonKana, matchesPersonSearch } from "./name-search.mjs";
+} from "./dom-helpers.mjs?v=20260423-cachefix";
+import { estimatePersonKana, matchesPersonSearch } from "./name-search.mjs?v=20260423-cachefix";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-23 長押し見直しと並び替え";
+const WEB_BETA_BUILD_LABEL = "2026-04-23 更新キャッシュ修正";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -1873,7 +1873,7 @@ function bulkAiFailureReasonToText(reason) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js");
+    await navigator.serviceWorker.register("./sw.js?v=20260423-cachefix", { updateViaCache: "none" });
   } catch {
     // ignore
   }
