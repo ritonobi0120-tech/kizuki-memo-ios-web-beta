@@ -7,6 +7,7 @@ const {
   buildRefreshUrl,
   escapeHtml,
   resetDialogScroll,
+  resolveDialogPresentation,
   showPreparedDialog,
   syncDialogBodyState,
 } = await import("./dom-helpers.mjs");
@@ -42,11 +43,34 @@ test("syncDialogBodyState toggles the dialog-open class from dialog states", () 
   assert.deepEqual(calls, [["dialog-open", true]]);
 });
 
+test("resolveDialogPresentation prefers sheet mode on iPhone Safari", () => {
+  assert.equal(
+    resolveDialogPresentation({
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      maxTouchPoints: 5,
+      innerWidth: 390,
+    }),
+    "sheet",
+  );
+  assert.equal(
+    resolveDialogPresentation({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+      maxTouchPoints: 0,
+      innerWidth: 1280,
+    }),
+    "modal",
+  );
+});
+
 test("showPreparedDialog resets scroll, opens modal, and resyncs body state", () => {
   let scrolled = 12;
-  let opened = false;
+  let openedModal = false;
   let toggled = false;
   const dialog = {
+    open: false,
+    dataset: {},
     querySelector(selector) {
       assert.equal(selector, ".sheet-content");
       return {
@@ -59,9 +83,12 @@ test("showPreparedDialog resets scroll, opens modal, and resyncs body state", ()
       };
     },
     showModal() {
-      opened = true;
+      openedModal = true;
+      dialog.open = true;
     },
-    open: true,
+    show() {
+      throw new Error("modeless show should not be used in modal presentation");
+    },
   };
   const body = {
     classList: {
@@ -73,11 +100,34 @@ test("showPreparedDialog resets scroll, opens modal, and resyncs body state", ()
     },
   };
 
-  showPreparedDialog(dialog, { dialogs: { dialog }, body });
+  showPreparedDialog(dialog, { dialogs: { dialog }, body, presentation: "modal" });
 
   assert.equal(scrolled, 0);
-  assert.equal(opened, true);
+  assert.equal(openedModal, true);
   assert.equal(toggled, true);
+  assert.equal(dialog.dataset.presentation, "modal");
+});
+
+test("showPreparedDialog can use sheet presentation without showModal", () => {
+  let openedSheet = false;
+  const dialog = {
+    dataset: {},
+    querySelector() {
+      return null;
+    },
+    show() {
+      openedSheet = true;
+    },
+    showModal() {
+      throw new Error("showModal should not run for sheet presentation");
+    },
+    open: false,
+  };
+
+  showPreparedDialog(dialog, { presentation: "sheet", body: null });
+
+  assert.equal(openedSheet, true);
+  assert.equal(dialog.dataset.presentation, "sheet");
 });
 
 test("bindDialogStateEvents wires close and cancel to the shared sync callback", () => {

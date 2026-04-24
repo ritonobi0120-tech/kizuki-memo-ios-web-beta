@@ -11,7 +11,7 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=20260423-cachefix" />
+    <link rel="stylesheet" href="./styles.css?v=20260424-safari-search" />
   </head>
   <body>
     <div id="app">
@@ -35,18 +35,6 @@
             <h2>名前一覧</h2>
             <p class="subtle">タップですぐ記録。長押しで整理ノートと今たまってる文章を確認できます。</p>
           </div>
-          <div class="actions wrap">
-            <p id="selection-count-label" class="subtle" hidden></p>
-            <button id="select-mode-button" class="ghost-button" type="button">選択</button>
-            <button id="move-selected-button" class="ghost-button" type="button" hidden>移動</button>
-            <button id="cancel-selection-button" class="ghost-button" type="button" hidden>やめる</button>
-            <button id="start-reorder-button" class="ghost-button" type="button">並び替え</button>
-            <button id="sort-alpha-button" class="ghost-button" type="button" hidden>50音順にする</button>
-            <button id="finish-reorder-button" class="ghost-button" type="button" hidden>完了</button>
-            <button id="add-folder-button" class="ghost-button" type="button">フォルダを作る</button>
-            <button id="open-bulk-ai-button" class="ghost-button" type="button">一括AI整理</button>
-            <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
-          </div>
         </div>
         <label class="stack">
           <span class="label">検索</span>
@@ -59,6 +47,17 @@
             aria-label="名前・呼び名・かなで検索"
           />
         </label>
+        <div id="board-actions" class="actions wrap">
+          <p id="selection-count-label" class="subtle" hidden></p>
+          <button id="select-mode-button" class="ghost-button" type="button">選択</button>
+          <button id="move-selected-button" class="ghost-button" type="button" hidden>移動</button>
+          <button id="cancel-selection-button" class="ghost-button" type="button" hidden>やめる</button>
+          <button id="start-reorder-button" class="ghost-button" type="button">並び替え</button>
+          <button id="sort-alpha-button" class="ghost-button" type="button" hidden>50音順にする</button>
+          <button id="finish-reorder-button" class="ghost-button" type="button" hidden>完了</button>
+          <button id="open-bulk-ai-button" class="ghost-button" type="button">一括AI整理</button>
+          <button id="add-person-button" class="primary-chip" type="button">名前を追加</button>
+        </div>
         <div id="board-summary" class="board-summary" aria-live="polite"></div>
         <div id="folder-filter-bar" class="filter-bar" aria-label="フォルダ"></div>
         <section id="folder-manage-card" class="details-card stack" hidden>
@@ -351,6 +350,6 @@
       <span id="toast-message"></span>
       <button id="toast-action" class="toast-action" type="button" hidden></button>
     </div>
-    <script type="module" src="./app.js?v=20260423-cachefix"></script>
+    <script type="module" src="./app.js?v=20260424-safari-search"></script>
   </body>
-  </html>
+</html>

@@ -14,14 +14,40 @@ export function bindDialogStateEvents({ dialogs, onSync }) {
   }
 }
 
-export function syncDialogBodyState({ dialogs, body = document.body }) {
+export function syncDialogBodyState({ dialogs, body = globalThis.document?.body } = {}) {
   const anyOpen = Object.values(dialogs).some((dialog) => dialog.open);
-  body.classList.toggle("dialog-open", anyOpen);
+  body?.classList?.toggle("dialog-open", anyOpen);
 }
 
-export function showPreparedDialog(dialog, { dialogs, body = document.body } = {}) {
+export function resolveDialogPresentation({
+  userAgent = globalThis.navigator?.userAgent ?? "",
+  maxTouchPoints = globalThis.navigator?.maxTouchPoints ?? 0,
+  innerWidth = globalThis.window?.innerWidth ?? 1024,
+} = {}) {
+  const isIPhoneSafari =
+    /iPhone/i.test(userAgent) &&
+    /Safari/i.test(userAgent) &&
+    !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(userAgent);
+  return isIPhoneSafari && maxTouchPoints > 0 && innerWidth <= 520 ? "sheet" : "modal";
+}
+
+export function showPreparedDialog(
+  dialog,
+  {
+    dialogs,
+    body = globalThis.document?.body,
+    presentation = resolveDialogPresentation(),
+  } = {},
+) {
   resetDialogScroll(dialog);
-  dialog.showModal();
+  dialog.dataset.presentation = presentation;
+  if (!dialog.open) {
+    if (presentation === "sheet" && typeof dialog.show === "function") {
+      dialog.show();
+    } else {
+      dialog.showModal();
+    }
+  }
   if (dialogs) {
     syncDialogBodyState({ dialogs, body });
   }

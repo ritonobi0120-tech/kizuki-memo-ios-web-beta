@@ -2,7 +2,7 @@ import {
   composeDraftText,
   detectSpeechSupport,
   mapSpeechErrorMessage,
-} from "./speech-support.mjs?v=20260423-cachefix";
+} from "./speech-support.mjs?v=20260424-safari-search";
 import {
   BOARD_FILTERS,
   applyBoardFilter,
@@ -11,7 +11,7 @@ import {
   buildHandoffBundle as buildUiHandoffBundle,
   nextMemosForHandoff,
   parseBulkAiResponse,
-} from "./ui-logic.mjs?v=20260423-cachefix";
+} from "./ui-logic.mjs?v=20260424-safari-search";
 import {
   DEFAULT_FOLDER_PRESETS,
   buildImportConfirmationMessage,
@@ -24,7 +24,7 @@ import {
   persistAuxJson,
   persistState as persistStoredState,
   summarizeStateCounts as summarizeStoredStateCounts,
-} from "./storage-logic.mjs?v=20260423-cachefix";
+} from "./storage-logic.mjs?v=20260424-safari-search";
 import {
   bindDialogStateEvents as bindDialogStateEventsHelper,
   bindLongPress as bindLongPressHelper,
@@ -32,13 +32,13 @@ import {
   escapeHtml as escapeHtmlHelper,
   showPreparedDialog as showPreparedDialogHelper,
   syncDialogBodyState as syncDialogBodyStateHelper,
-} from "./dom-helpers.mjs?v=20260423-cachefix";
-import { estimatePersonKana, matchesPersonSearch } from "./name-search.mjs?v=20260423-cachefix";
+} from "./dom-helpers.mjs?v=20260424-safari-search";
+import { estimatePersonKana, matchesPersonSearch } from "./name-search.mjs?v=20260424-safari-search";
 
 const STORAGE_KEY = "kizuki-ios-web-beta-v1";
 const BULK_AI_SESSION_KEY = "kizuki-ios-web-beta-bulk-ai-session-v1";
 const STORAGE_SCHEMA_VERSION = 1;
-const WEB_BETA_BUILD_LABEL = "2026-04-23 更新キャッシュ修正";
+const WEB_BETA_BUILD_LABEL = "2026-04-24 Safari安定化 + 検索導線整理";
 const PUBLIC_WEB_BETA_URL = "https://ritonobi0120-tech.github.io/kizuki-memo-ios-web-beta/";
 const FOLDER_COLOR_CHOICES = [
   { colorKey: "sky", label: "青", color: "#1A73E8" },
@@ -68,6 +68,7 @@ const dialogs = {
 
 const elements = {
   installCard: document.getElementById("install-card"),
+  boardActions: document.getElementById("board-actions"),
   boardSearchInput: document.getElementById("board-search-input"),
   boardSummary: document.getElementById("board-summary"),
   folderFilterBar: document.getElementById("folder-filter-bar"),
@@ -88,7 +89,6 @@ const elements = {
   sortAlphaButton: document.getElementById("sort-alpha-button"),
   finishReorderButton: document.getElementById("finish-reorder-button"),
   addPersonButton: document.getElementById("add-person-button"),
-  addFolderButton: document.getElementById("add-folder-button"),
   openBulkAiButton: document.getElementById("open-bulk-ai-button"),
   openSettingsButton: document.getElementById("open-settings-button"),
   personDialogTitle: document.getElementById("person-dialog-title"),
@@ -219,10 +219,19 @@ function boot() {
 function bindEvents() {
   elements.boardSearchInput.addEventListener("input", () => {
     ui.searchQuery = elements.boardSearchInput.value;
+    if (isSearching()) {
+      clearSelectionMode();
+      exitReorderMode();
+    }
     trimSelectionToVisible();
-    renderPeople();
+    render();
   });
   elements.folderFilterBar.addEventListener("click", (event) => {
+    const addButton = event.target.closest("[data-add-folder]");
+    if (addButton) {
+      createFolderFromPrompt();
+      return;
+    }
     const button = event.target.closest("[data-folder-filter]");
     if (!button) return;
     ui.folderFilter = button.dataset.folderFilter;
@@ -256,9 +265,7 @@ function bindEvents() {
     render();
   });
   elements.finishReorderButton.addEventListener("click", () => {
-    ui.reorderMode = false;
-    ui.reorderDraggingId = null;
-    ui.reorderDropTargetId = null;
+    exitReorderMode();
     render();
   });
   elements.sortAlphaButton.addEventListener("click", () => {
@@ -267,9 +274,6 @@ function bindEvents() {
 
   elements.addPersonButton.addEventListener("click", () => {
     openPersonDialog();
-  });
-  elements.addFolderButton.addEventListener("click", () => {
-    createFolderFromPrompt();
   });
   elements.renameFolderButton.addEventListener("click", () => {
     renameSelectedFolder();
@@ -477,24 +481,29 @@ function renderSettingsMeta() {
 
 function renderSelectionActions() {
   const selectedCount = ui.selectedPersonIds.length;
+  const searching = isSearching();
   const reorderActive = ui.reorderMode;
+  elements.boardActions.hidden = searching && !ui.selectionMode && !reorderActive;
   elements.selectionCountLabel.hidden = !ui.selectionMode;
   elements.selectionCountLabel.textContent = `${selectedCount}人を選択中`;
-  elements.selectModeButton.hidden = ui.selectionMode || reorderActive;
+  elements.selectModeButton.hidden = ui.selectionMode || reorderActive || searching;
   elements.moveSelectedButton.hidden = !ui.selectionMode;
   elements.cancelSelectionButton.hidden = !ui.selectionMode;
   elements.moveSelectedButton.disabled = selectedCount === 0;
-  elements.startReorderButton.hidden = ui.selectionMode || reorderActive;
+  elements.startReorderButton.hidden = ui.selectionMode || reorderActive || searching;
   elements.sortAlphaButton.hidden = !reorderActive;
   elements.finishReorderButton.hidden = !reorderActive;
-  elements.addPersonButton.hidden = ui.selectionMode || reorderActive;
-  elements.addFolderButton.hidden = ui.selectionMode || reorderActive;
-  elements.openBulkAiButton.hidden = ui.selectionMode || reorderActive;
+  elements.addPersonButton.hidden = ui.selectionMode || reorderActive || searching;
+  elements.openBulkAiButton.hidden = ui.selectionMode || reorderActive || searching;
 }
 
 function renderPeople() {
   const visiblePeople = currentVisiblePeople();
+  const searching = isSearching();
   elements.boardSearchInput.value = ui.searchQuery;
+  elements.boardSummary.hidden = searching;
+  elements.folderFilterBar.hidden = searching;
+  elements.boardFilterBar.hidden = searching;
 
   renderBoardSummary(
     buildBoardSummary({
@@ -515,7 +524,7 @@ function renderPeople() {
         ? "<p>検索に合う名前が見つかりません。ひらがなや別の呼び方でも試してください。</p>"
       : "<p>このフォルダにはまだ名前がありません。フォルダを戻すか、別の名前を入れてください。</p>";
 
-  const showFolderMeta = ui.folderFilter === "all";
+  const showFolderMeta = searching || ui.folderFilter === "all";
   for (const person of visiblePeople) {
     const isRecentlySaved = person.id === ui.lastSavedPersonId;
     const isSelected = ui.selectedPersonIds.includes(person.id);
@@ -574,6 +583,10 @@ function renderPeople() {
 }
 
 function renderFolderManager() {
+  if (isSearching()) {
+    elements.folderManageCard.hidden = true;
+    return;
+  }
   const folder = selectedFolder();
   elements.folderManageCard.hidden = !folder;
   if (!folder) return;
@@ -1137,6 +1150,11 @@ function summaryPillMarkup(label, value) {
 }
 
 function renderBoardFilters() {
+  if (isSearching()) {
+    elements.boardFilterBar.hidden = true;
+    return;
+  }
+  elements.boardFilterBar.hidden = false;
   elements.boardFilterBar.innerHTML = BOARD_FILTERS.map(
     (filter) => `
       <button
@@ -1151,6 +1169,11 @@ function renderBoardFilters() {
 }
 
 function renderFolderFilters() {
+  if (isSearching()) {
+    elements.folderFilterBar.hidden = true;
+    return;
+  }
+  elements.folderFilterBar.hidden = false;
   const filterButtons = [
     { id: "all", label: "すべて" },
     { id: "unassigned", label: "未分類" },
@@ -1173,6 +1196,11 @@ function renderFolderFilters() {
       `,
     )
     .join("");
+  elements.folderFilterBar.innerHTML += `
+    <button type="button" class="filter-pill filter-pill--add" data-add-folder="true" aria-label="フォルダを追加">
+      <span aria-hidden="true">＋</span>
+    </button>
+  `;
 }
 
 function selectedFolder() {
@@ -1504,7 +1532,8 @@ function folderFor(folderId) {
 }
 
 function currentVisiblePeople() {
-  const folderScopedPeople = applyFolderFilter(state.people)
+  const searching = isSearching();
+  const searchScopedPeople = (searching ? state.people : applyFolderFilter(state.people))
     .filter((person) =>
       matchesPersonSearch({
         query: ui.searchQuery,
@@ -1512,8 +1541,11 @@ function currentVisiblePeople() {
       }),
     )
     .sort((a, b) => a.sortOrder - b.sortOrder);
+  if (searching) {
+    return searchScopedPeople;
+  }
   return applyBoardFilter({
-    people: folderScopedPeople,
+    people: searchScopedPeople,
     filter: ui.boardFilter,
     getPendingCount: pendingMemoCount,
   });
@@ -1676,6 +1708,12 @@ function togglePersonSelection(personId) {
 function clearSelectionMode() {
   ui.selectionMode = false;
   ui.selectedPersonIds = [];
+}
+
+function exitReorderMode() {
+  ui.reorderMode = false;
+  ui.reorderDraggingId = null;
+  ui.reorderDropTargetId = null;
 }
 
 function trimSelectionToVisible() {
@@ -1873,7 +1911,7 @@ function bulkAiFailureReasonToText(reason) {
 async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   try {
-    await navigator.serviceWorker.register("./sw.js?v=20260423-cachefix", { updateViaCache: "none" });
+    await navigator.serviceWorker.register("./sw.js?v=20260424-safari-search", { updateViaCache: "none" });
   } catch {
     // ignore
   }
@@ -1889,6 +1927,10 @@ function syncDialogBodyState() {
 
 function showPreparedDialog(dialog) {
   showPreparedDialogHelper(dialog, { dialogs, body: document.body });
+}
+
+function isSearching() {
+  return ui.searchQuery.trim().length > 0;
 }
 
 async function refreshAppVersion() {

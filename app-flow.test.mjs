@@ -64,21 +64,30 @@ async function withPage(run) {
   }
 }
 
-test("dialogs are populated before showModal is called", async () => {
+test("dialogs are populated before the iPhone sheet opens", async () => {
   await withPage(async (page, baseUrl) => {
     await page.addInitScript(() => {
       window.__dialogOpenSnapshots = [];
-      const originalShowModal = HTMLDialogElement.prototype.showModal;
-      HTMLDialogElement.prototype.showModal = function patchedShowModal() {
+      const captureSnapshot = (dialog, openKind) => {
         window.__dialogOpenSnapshots.push({
-          id: this.id,
+          id: dialog.id,
+          openKind,
           captureName: document.getElementById("capture-person-name")?.textContent ?? "",
           captureAutosaveStatus: document.getElementById("capture-autosave-status")?.textContent ?? "",
           previewName: document.getElementById("preview-name-input")?.value ?? "",
           summaryName: document.getElementById("summary-person-name")?.textContent ?? "",
           summaryMeta: document.getElementById("summary-meta")?.textContent ?? "",
         });
+      };
+      const originalShowModal = HTMLDialogElement.prototype.showModal;
+      const originalShow = HTMLDialogElement.prototype.show;
+      HTMLDialogElement.prototype.showModal = function patchedShowModal() {
+        captureSnapshot(this, "modal");
         return originalShowModal.call(this);
+      };
+      HTMLDialogElement.prototype.show = function patchedShow() {
+        captureSnapshot(this, "sheet");
+        return originalShow.call(this);
       };
     });
 
@@ -102,13 +111,16 @@ test("dialogs are populated before showModal is called", async () => {
     const summarySnapshot = snapshots.find((item) => item.id === "summary-dialog");
 
     assert.ok(captureSnapshot, "capture dialog should open");
+    assert.equal(captureSnapshot.openKind, "sheet");
     assert.equal(captureSnapshot.captureName, "回帰テスト");
     assert.match(captureSnapshot.captureAutosaveStatus, /自動で保存|自動保存済み/);
 
     assert.ok(previewSnapshot, "preview dialog should open");
+    assert.equal(previewSnapshot.openKind, "sheet");
     assert.equal(previewSnapshot.previewName, "回帰テスト");
 
     assert.ok(summarySnapshot, "summary dialog should open");
+    assert.equal(summarySnapshot.openKind, "sheet");
     assert.equal(summarySnapshot.summaryName, "回帰テスト");
     assert.match(summarySnapshot.summaryMeta, /整理ノート|最終更新/);
   });
@@ -189,6 +201,22 @@ test("top search can find kanji names from hiragana input", async () => {
   });
 });
 
+test("search shows only matching names and hides folder controls until search is cleared", async () => {
+  await withPage(async (page, baseUrl) => {
+    await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await page.locator("#folder-filter-bar").getByRole("button", { name: /すぐ話す/ }).click();
+
+    await page.getByPlaceholder("名前・呼び名・かなで検索").fill("さとう");
+
+    await assert.doesNotReject(() => page.getByRole("button", { name: /佐藤 あおい/ }).waitFor());
+    assert.equal(await page.getByRole("button", { name: /田中 はる/ }).count(), 0);
+    await expectHidden(page.locator("#board-actions"));
+    await expectHidden(page.locator("#folder-filter-bar"));
+    await expectHidden(page.locator("#board-filter-bar"));
+    await expectHidden(page.locator("#folder-manage-card"));
+  });
+});
+
 test("board top no longer shows count summary chips", async () => {
   await withPage(async (page, baseUrl) => {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -205,7 +233,7 @@ test("creating a folder from the board adds the chip without auto-assigning ever
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await page.locator("#folder-filter-bar").getByRole("button", { name: "フォルダを追加" }).click();
     await assert.doesNotReject(() => page.getByRole("button", { name: "名前を追加" }).waitFor());
 
     await page.getByRole("button", { name: "名前を追加" }).click();
@@ -229,7 +257,7 @@ test("selected folder can be deleted from the board", async () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await page.locator("#folder-filter-bar").getByRole("button", { name: "フォルダを追加" }).click();
     await page.locator("#folder-filter-bar").getByRole("button", { name: /消す用/ }).click();
 
     await page.getByRole("button", { name: "このフォルダを削除" }).click();
@@ -249,7 +277,7 @@ test("selected folder can be renamed from the board", async () => {
     });
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: "フォルダを作る" }).click();
+    await page.locator("#folder-filter-bar").getByRole("button", { name: "フォルダを追加" }).click();
     await page.locator("#folder-filter-bar").getByRole("button", { name: /旧フォルダ/ }).click();
 
     await page.getByRole("button", { name: "名前を変える" }).click();
@@ -734,4 +762,13 @@ async function dragReorderHandle(page, sourceName, targetName) {
 async function expectText(locator, pattern) {
   await assert.doesNotReject(() => locator.waitFor());
   assert.match((await locator.textContent()) ?? "", pattern);
+}
+
+async function expectHidden(locator) {
+  assert.equal(
+    await locator.evaluate(
+      (node) => node.hidden || globalThis.getComputedStyle(node).display === "none",
+    ),
+    true,
+  );
 }
